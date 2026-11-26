@@ -279,7 +279,7 @@ export const CashierLogin: React.FC<CashierLoginProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 flex items-center justify-center p-2.5 sm:p-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 flex items-center justify-center p-2.5 sm:p-4">
       <div className="w-full max-w-[490px]">
         {/* Compact Cooperative Brand Header */}
         <div className="flex items-center justify-center gap-3 mb-3">
@@ -293,14 +293,14 @@ export const CashierLogin: React.FC<CashierLoginProps> = ({
                 className="w-full h-full object-cover object-center scale-[1.07]"
               />
             ) : (
-              <Store className="w-6 h-6 text-emerald-300" />
+              <Store className="w-6 h-6 text-blue-300" />
             )}
           </div>
           <div className="text-left">
             <h1 className="text-lg sm:text-xl font-black text-white tracking-tight leading-tight">
               {society.name}
             </h1>
-            <p className="text-[11px] text-emerald-300 font-semibold leading-snug">
+            <p className="text-[11px] text-blue-300 font-semibold leading-snug">
               Village : Berachampa · Dist. North 24 Parganas
             </p>
           </div>
@@ -325,17 +325,17 @@ export const CashierLogin: React.FC<CashierLoginProps> = ({
               </span>
             </div>
           ) : (
-            <div className="bg-emerald-800 text-white px-5 py-2.5 flex items-center justify-between border-b border-emerald-900">
+            <div className="bg-blue-800 text-white px-5 py-2.5 flex items-center justify-between border-b border-blue-900">
               <div className="flex items-center gap-2">
-                <Store className="w-4 h-4 text-emerald-200" />
+                <Store className="w-4 h-4 text-blue-200" />
                 <div>
                   <h3 className="font-bold text-xs sm:text-sm text-white leading-tight">Cashier Staff Sign In</h3>
-                  <p className="text-[10px] text-emerald-200 leading-tight">
+                  <p className="text-[10px] text-blue-200 leading-tight">
                     Point of Sale &amp; Billing Register
                   </p>
                 </div>
               </div>
-              <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-900/80 px-2 py-0.5 rounded text-emerald-300 border border-emerald-700/50">
+              <span className="text-[10px] font-bold uppercase tracking-wider bg-blue-900/80 px-2 py-0.5 rounded text-blue-200 border border-blue-700/50">
                 Counter Staff
               </span>
             </div>
@@ -349,7 +349,7 @@ export const CashierLogin: React.FC<CashierLoginProps> = ({
                 onClick={() => switchMode('cashier')}
                 className={`py-1.5 px-2 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                   loginMode === 'cashier'
-                    ? 'bg-emerald-600 text-white shadow-sm'
+                    ? 'bg-blue-600 text-white shadow-sm'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -475,7 +475,7 @@ export const CashierLogin: React.FC<CashierLoginProps> = ({
                       }
                     }}
                     placeholder="Enter allowed Email ID"
-                    className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                    className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                     required
                   />
                   <datalist id="allowed-external-emails">
@@ -504,7 +504,7 @@ export const CashierLogin: React.FC<CashierLoginProps> = ({
                     value={loginId}
                     onChange={(e) => setLoginId(e.target.value)}
                     placeholder={loginMode === 'admin' ? 'e.g. admin' : 'e.g. subrata or priya'}
-                    className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                    className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                     required
                   />
                 </div>
@@ -524,7 +524,7 @@ export const CashierLogin: React.FC<CashierLoginProps> = ({
                   <button
                     type="button"
                     onClick={() => setIsResetModalOpen(true)}
-                    className="text-[11px] font-bold text-emerald-700 hover:text-emerald-900 hover:underline flex items-center gap-1 cursor-pointer"
+                    className="text-[11px] font-bold text-blue-700 hover:text-blue-900 hover:underline flex items-center gap-1 cursor-pointer"
                   >
                     <KeyRound className="w-3 h-3" />
                     <span>Reset Password</span>
@@ -544,7 +544,7 @@ export const CashierLogin: React.FC<CashierLoginProps> = ({
                         ? 'Enter admin password...'
                         : 'Enter your cashier PIN...'
                     }
-                    className="w-full pl-9 pr-9 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono-code"
+                    className="w-full pl-9 pr-9 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono-code"
                     required
                   />
                   <button
@@ -574,7 +574,7 @@ export const CashierLogin: React.FC<CashierLoginProps> = ({
                       }
                     }
                   }}
-                  className="w-3.5 h-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
                 <span>Remember Login ID &amp; Password (auto-fill)</span>
               </label>
@@ -586,7 +586,7 @@ export const CashierLogin: React.FC<CashierLoginProps> = ({
                 className={`w-full py-2.5 active:scale-[0.99] text-white font-bold text-sm rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer ${
                   loginMode === 'admin'
                     ? 'bg-slate-900 hover:bg-slate-800 shadow-slate-950/20'
-                    : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/20'
+                    : 'bg-blue-600 hover:bg-blue-500 shadow-blue-950/20'
                 }`}
               >
                 {isLoading ? (
@@ -620,17 +620,17 @@ export const CashierLogin: React.FC<CashierLoginProps> = ({
                       key={cashier.id}
                       type="button"
                       onClick={() => handleQuickFillCashier(cashier)}
-                      className="p-2 rounded-lg border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/50 flex items-center justify-between text-left transition-colors group cursor-pointer"
+                      className="p-2 rounded-lg border border-slate-200 hover:border-blue-500 hover:bg-blue-50/50 flex items-center justify-between text-left transition-colors group cursor-pointer"
                     >
                       <div className="min-w-0">
-                        <div className="text-[11px] font-bold text-slate-900 group-hover:text-emerald-700 truncate">
+                        <div className="text-[11px] font-bold text-slate-900 group-hover:text-blue-700 truncate">
                           {cashier.name}
                         </div>
                         <div className="text-[10px] text-slate-500 font-mono-code truncate">
                           ID: <strong className="text-slate-700">{cashier.loginId}</strong>
                         </div>
                       </div>
-                      <span className="text-[9px] font-semibold text-emerald-700 bg-emerald-100/70 px-1.5 py-0.5 rounded flex-shrink-0 ml-1">
+                      <span className="text-[9px] font-semibold text-blue-700 bg-blue-100/70 px-1.5 py-0.5 rounded flex-shrink-0 ml-1">
                         {cashier.staffCode}
                       </span>
                     </button>
@@ -679,7 +679,7 @@ export const CashierLogin: React.FC<CashierLoginProps> = ({
           <div className="bg-slate-50 px-5 py-2 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
             <div className="flex items-center gap-3">
               <span className="flex items-center gap-1">
-                <Lock className="w-3 h-3 text-emerald-600" />
+                <Lock className="w-3 h-3 text-blue-600" />
                 <span>Restricted External Link</span>
               </span>
               <a
