@@ -26,6 +26,9 @@ interface CashierLoginProps {
   adminSettings?: AdminStoreSettings;
   onPasswordUpdated: (updatedCashier: CashierUser) => void;
   sessionNotice?: string | null;
+  cloudOffline?: boolean;
+  cloudMessage?: string;
+  onRetryCloud?: () => void;
 }
 
 const AUTOFILL_STORAGE_KEY = 'nabkul_autofill_login_v1';
@@ -81,6 +84,9 @@ export const CashierLogin: React.FC<CashierLoginProps> = ({
   adminSettings,
   onPasswordUpdated,
   sessionNotice,
+  cloudOffline = false,
+  cloudMessage,
+  onRetryCloud,
 }) => {
   const savedAutofill = React.useMemo(() => loadSavedAutofill(), []);
   const initialMode: 'cashier' | 'admin' =
@@ -380,6 +386,29 @@ export const CashierLogin: React.FC<CashierLoginProps> = ({
                 Restricted external link access — only specified authorized email IDs can open this portal.
               </p>
             </div>
+
+            {cloudOffline && (
+              <div className="p-2.5 bg-amber-50 border border-amber-300 rounded-xl text-[11px] text-amber-950 flex items-center justify-between gap-2">
+                <div className="flex items-start gap-2 min-w-0">
+                  <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <div className="font-bold text-amber-900">Cloud Database Not Connected</div>
+                    <div className="text-[10px] text-amber-800 break-words">
+                      {cloudMessage || 'Server database connection is initializing or env variables are missing.'}
+                    </div>
+                  </div>
+                </div>
+                {onRetryCloud && (
+                  <button
+                    type="button"
+                    onClick={onRetryCloud}
+                    className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] shrink-0 cursor-pointer"
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
+            )}
 
             {(() => {
               const txMode = getTransactionMode(adminSettings);

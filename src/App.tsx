@@ -2071,7 +2071,7 @@ export default function App() {
     }
   }, [activeTab, currentCashier, reloadStoreData]);
 
-  const isCloudLocked = cloudStatus.checked && !cloudStatus.connected;
+  const isCloudLocked = Boolean(currentCashier) && cloudStatus.checked && !cloudStatus.connected;
 
   // When Cloud Storage is not active, close active checkout/scanner modals, blur active inputs, and block any keyboard/barcode/submit events in background windows
   useEffect(() => {
@@ -2146,6 +2146,9 @@ export default function App() {
         adminSettings={adminSettings}
         onPasswordUpdated={handlePasswordUpdated}
         sessionNotice={sessionNotice}
+        cloudOffline={cloudStatus.checked && !cloudStatus.connected}
+        cloudMessage={cloudStatus.message}
+        onRetryCloud={() => checkCloudStorageStatus(true)}
       />
     );
   }
