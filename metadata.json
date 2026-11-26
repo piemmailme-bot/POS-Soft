@@ -1,0 +1,8 @@
+{
+  "name": "Deganga CADPFSCS Ltd - Smart POS \u0026 QR Store",
+  "description": "Smart retail POS, inventory management, and QR code billing platform for Nabkul Cooperative Society, Kolkata.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

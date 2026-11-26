@@ -1,0 +1,134 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #1e293b;
+    background-color: #f8fafc;
+  }
+}
+
+.font-mono-code {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.pos-items-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 #f1f5f9;
+}
+
+.pos-items-scroll::-webkit-scrollbar {
+  width: 9px;
+}
+
+.pos-items-scroll::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 9999px;
+}
+
+.pos-items-scroll::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 9999px;
+  border: 2px solid #f1f5f9;
+}
+
+.pos-items-scroll::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+@keyframes scanLine {
+  0% {
+    top: 5%;
+    opacity: 0.8;
+  }
+  50% {
+    top: 92%;
+    opacity: 1;
+  }
+  100% {
+    top: 5%;
+    opacity: 0.8;
+  }
+}
+
+.animate-scanner-line {
+  animation: scanLine 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes splashEnter {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes splashProgress {
+  0% {
+    transform: scaleX(0);
+  }
+  100% {
+    transform: scaleX(1);
+  }
+}
+
+.animate-splash-enter {
+  animation: splashEnter 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-splash-progress {
+  animation: splashProgress 7.78s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-splash-enter,
+  .animate-splash-progress {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-container, .print-container * {
+    visibility: visible;
+  }
+  .print-container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 10px;
+    background: white !important;
+    color: black !important;
+  }
+  body:has(.print-multipage) header,
+  body:has(.print-multipage) nav,
+  body:has(.print-multipage) footer,
+  body:has(.print-multipage) .print\:hidden {
+    display: none !important;
+  }
+  body:has(.print-multipage) .print-multipage,
+  body:has(.print-multipage) .print-multipage * {
+    visibility: visible !important;
+  }
+  body:has(.print-multipage) .print-multipage {
+    position: static !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    color: black !important;
+  }
+  body {
+    background: white !important;
+    color: black !important;
+  }
+}
