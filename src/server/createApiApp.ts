@@ -757,11 +757,15 @@ export function createApiApp(options: CreateApiAppOptions = {}): express.Express
   app.post('/api/parties', requireLoggedInAuthorizedMember, requireCloudStorageActive, async (req, res) => {
     try {
       if (!req.body?.name || !String(req.body.name).trim()) {
-        return res.status(400).json({ success: false, error: 'Party name is required.' });
+        return res.status(400).json({ success: false, error: 'Party / Company name is required.' });
       }
       res.status(201).json(await upsertPartyAccount(req.body));
     } catch (error: any) {
-      res.status(500).json({ success: false, error: error?.message || 'Failed to save party account' });
+      const status = Number(error?.statusCode) || 500;
+      res.status(status).json({
+        success: false,
+        error: error?.message || 'Failed to save party account',
+      });
     }
   });
 
@@ -769,8 +773,12 @@ export function createApiApp(options: CreateApiAppOptions = {}): express.Express
     try {
       await deletePartyAccount(req.params.id);
       res.json({ success: true });
-    } catch {
-      res.status(500).json({ error: 'Failed to delete party account' });
+    } catch (error: any) {
+      const status = Number(error?.statusCode) || 500;
+      res.status(status).json({
+        success: false,
+        error: error?.message || 'Failed to delete party account',
+      });
     }
   });
 

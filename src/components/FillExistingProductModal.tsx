@@ -8,8 +8,21 @@ import {
   CheckCircle2,
   AlertCircle,
   TrendingUp,
+  Plus,
+  Building2,
+  Percent,
 } from 'lucide-react';
-import { Product, PartyAccount } from '../types';
+import {
+  AccountLedgerVoucher,
+  PartyAccount,
+  Product,
+  PurchaseCommissionMode,
+  PurchaseCommissionType,
+  PurchaseTransaction,
+  ReturnNote,
+} from '../types';
+import { computeSupplierLedger } from '../utils/supplierLedger';
+import { SupplierFormModal, SupplierSaveResult } from './SupplierFormModal';
 
 export interface FillExistingOptions {
   purchasePrice?: number;
@@ -28,6 +41,12 @@ export interface FillExistingOptions {
   sellingPrice?: number;
   sellingPriceWD?: number;
   sellingPriceWithGst?: number;
+  commissionType?: PurchaseCommissionType;
+  commissionPercent?: number;
+  commissionAmount?: number;
+  commissionMode?: PurchaseCommissionMode;
+  commissionNote?: string;
+  netPayableAmount?: number;
 }
 
 interface FillExistingProductModalProps {
@@ -36,6 +55,10 @@ interface FillExistingProductModalProps {
   products: Product[];
   categories: string[];
   suppliers?: PartyAccount[];
+  purchaseTransactions?: PurchaseTransaction[];
+  accountVouchers?: AccountLedgerVoucher[];
+  returnNotes?: ReturnNote[];
+  onSaveSupplier?: (supplier: PartyAccount) => Promise<SupplierSaveResult>;
   initialProduct?: Product | null;
   onFillExistingProduct: (
     product: Product,
@@ -50,6 +73,10 @@ export const FillExistingProductModal: React.FC<FillExistingProductModalProps> =
   products,
   categories,
   suppliers = [],
+  purchaseTransactions = [],
+  accountVouchers = [],
+  returnNotes = [],
+  onSaveSupplier,
   initialProduct,
   onFillExistingProduct,
 }) => {
@@ -67,8 +94,33 @@ export const FillExistingProductModal: React.FC<FillExistingProductModalProps> =
   const [paymentStatus, setPaymentStatus] = useState<'CREDIT' | 'CASH' | 'BANK_UPI'>('BANK_UPI');
   const [useWeightedAverage, setUseWeightedAverage] = useState<boolean>(true);
   const [supplierNote, setSupplierNote] = useState<string>('');
+  const [commissionType, setCommissionType] = useState<PurchaseCommissionType>('NONE');
+  const [commissionInput, setCommissionInput] = useState<string>('');
+  const [commissionMode, setCommissionMode] = useState<PurchaseCommissionMode>('DEDUCT_BILL');
+  const [commissionNote, setCommissionNote] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showCreditConfirm, setShowCreditConfirm] = useState<boolean>(false);
+  const [isQuickAddSupplierOpen, setIsQuickAddSupplierOpen] = useState<boolean>(false);
+
+  const activeSuppliers = useMemo(
+    () => suppliers.filter((s) => s.isActive !== false),
+    [suppliers]
+  );
+
+  const selectedSupplierObj = useMemo(
+    () => suppliers.find((s) => s.id === supplierId) || null,
+    [suppliers, supplierId]
+  );
+
+  const selectedSupplierLedger = useMemo(() => {
+    if (!selectedSupplierObj) return null;
+    return computeSupplierLedger(
+      selectedSupplierObj,
+      purchaseTransactions,
+      accountVouchers,
+      returnNotes
+    );
+  }, [selectedSupplierObj, purchaseTransactions, accountVouchers, returnNotes]);
 
   const selectedProduct = useMemo(
     () => products.find((p) => p.id === selectedProductId) || null,
@@ -90,9 +142,18 @@ export const FillExistingProductModal: React.FC<FillExistingProductModalProps> =
     });
   }, [products, selectedCategory, searchQuery]);
 
-  // Populate fields when modal opens or product changes
+  const initializedSessionKeyRef = React.useRef<string | null>(null);
+
+  // Populate fields only when modal opens or initialProduct changes (never wipe during background sync)
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      initializedSessionKeyRef.current = null;
+      return;
+    }
+    const sessionKey = initialProduct ? `prod:${initialProduct.id}` : 'default';
+    if (initializedSessionKeyRef.current === sessionKey) return;
+    initializedSessionKeyRef.current = sessionKey;
+
     setErrorMsg(null);
     setAddedQuantity('');
     setSupplierNote('');
@@ -100,6 +161,10 @@ export const FillExistingProductModal: React.FC<FillExistingProductModalProps> =
     setSupplierInvoiceNo('');
     setPaymentStatus('BANK_UPI');
     setUseWeightedAverage(true);
+    setCommissionType('NONE');
+    setCommissionInput('');
+    setCommissionMode('DEDUCT_BILL');
+    setCommissionNote('');
     setShowCreditConfirm(false);
 
     if (initialProduct) {
@@ -172,6 +237,28 @@ export const FillExistingProductModal: React.FC<FillExistingProductModalProps> =
   const totalPurchaseAmount = Number((basePurchaseAmount + totalGstAmount).toFixed(2));
   const halfGst = Number((totalGstAmount / 2).toFixed(2));
 
+  const rawCommInput = Math.max(0, Number(commissionInput || 0) || 0);
+  const rawCommissionAmount =
+    commissionType === 'PERCENT'
+      ? Number(((basePurchaseAmount * Math.min(100, rawCommInput)) / 100).toFixed(2))
+      : commissionType === 'FIXED'
+      ? Number(rawCommInput.toFixed(2))
+      : 0;
+  const commissionAmount =
+    commissionMode === 'DEDUCT_BILL'
+      ? Number(Math.min(totalPurchaseAmount, rawCommissionAmount).toFixed(2))
+      : rawCommissionAmount;
+  const commissionPercent =
+    commissionType === 'PERCENT'
+      ? Number(Math.min(100, rawCommInput).toFixed(2))
+      : basePurchaseAmount > 0 && commissionAmount > 0
+      ? Number(((commissionAmount / basePurchaseAmount) * 100).toFixed(2))
+      : 0;
+  const netPayableAmount =
+    commissionAmount > 0 && commissionMode === 'DEDUCT_BILL'
+      ? Number(Math.max(0, totalPurchaseAmount - commissionAmount).toFixed(2))
+      : totalPurchaseAmount;
+
   const handleQuickQty = (val: number) => {
     const current = Number(addedQuantity || 0);
     setAddedQuantity(String(Number((current + val).toFixed(3))));
@@ -201,6 +288,12 @@ export const FillExistingProductModal: React.FC<FillExistingProductModalProps> =
       supplierInvoiceNo: supplierInvoiceNo.trim() || undefined,
       paymentStatus,
       supplierNote: combinedNote || undefined,
+      commissionType: commissionAmount > 0 ? commissionType : 'NONE',
+      commissionPercent: commissionAmount > 0 ? commissionPercent : 0,
+      commissionAmount: commissionAmount > 0 ? commissionAmount : 0,
+      commissionMode: commissionAmount > 0 ? commissionMode : 'DEDUCT_BILL',
+      commissionNote: commissionAmount > 0 ? commissionNote.trim() || undefined : undefined,
+      netPayableAmount,
     });
     setShowCreditConfirm(false);
     onClose();
@@ -466,18 +559,34 @@ export const FillExistingProductModal: React.FC<FillExistingProductModalProps> =
           <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                  Supplier Ledger (Optional)
-                </label>
+                <div className="flex items-center justify-between gap-1 mb-1">
+                  <label className="text-[11px] font-bold text-slate-700">
+                    Supplier / Company Master
+                  </label>
+                  {onSaveSupplier && (
+                    <button
+                      type="button"
+                      onClick={() => setIsQuickAddSupplierOpen(true)}
+                      className="text-[10px] font-extrabold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200 inline-flex items-center gap-0.5 transition-colors cursor-pointer"
+                      title="Register a new supplier without leaving Purchase Entry"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>New</span>
+                    </button>
+                  )}
+                </div>
                 <select
                   value={supplierId}
                   onChange={(e) => setSupplierId(e.target.value)}
                   className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
                 >
                   <option value="">General / Unspecified Supplier</option>
-                  {suppliers.map((sup) => (
+                  {activeSuppliers.map((sup) => (
                     <option key={sup.id} value={sup.id}>
-                      {sup.name} {sup.gstin ? `(${sup.gstin})` : ''}
+                      {sup.supplierCode ? `[${sup.supplierCode}] ` : ''}
+                      {sup.name}
+                      {sup.supplierCategory ? ` · ${sup.supplierCategory}` : ''}
+                      {sup.phone ? ` · ${sup.phone}` : ''}
                     </option>
                   ))}
                 </select>
@@ -519,6 +628,43 @@ export const FillExistingProductModal: React.FC<FillExistingProductModalProps> =
               </div>
             </div>
 
+            {selectedSupplierObj && selectedSupplierLedger && (
+              <div className="px-3 py-2 rounded-lg bg-blue-50/70 border border-blue-200 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                  <span className="font-mono-code font-extrabold text-blue-800">
+                    {selectedSupplierObj.supplierCode || 'SUP'}
+                  </span>
+                  <span className="font-bold text-slate-900 truncate">
+                    {selectedSupplierObj.name}
+                  </span>
+                  {selectedSupplierObj.gstin && (
+                    <span className="font-mono-code text-[10px] text-slate-600">
+                      GSTIN: {selectedSupplierObj.gstin}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 font-mono-code font-bold">
+                  {selectedSupplierLedger.outstandingBalance > 0 && (
+                    <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                      Payable: ₹{selectedSupplierLedger.outstandingBalance.toFixed(2)}
+                    </span>
+                  )}
+                  {selectedSupplierLedger.availableAdvance > 0 && (
+                    <span className="px-2 py-0.5 rounded bg-teal-100 text-teal-900 border border-teal-300">
+                      Available Advance: ₹{selectedSupplierLedger.availableAdvance.toFixed(2)}
+                    </span>
+                  )}
+                  {selectedSupplierLedger.outstandingBalance === 0 &&
+                    selectedSupplierLedger.availableAdvance === 0 && (
+                      <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        Balance: ₹0.00 Settled
+                      </span>
+                    )}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-center pt-1">
               <input
                 type="text"
@@ -539,6 +685,97 @@ export const FillExistingProductModal: React.FC<FillExistingProductModalProps> =
                 </span>
               </label>
             </div>
+          </div>
+
+          {/* Optional Company Commission / Dealer Rebate */}
+          <div className="p-3 rounded-xl bg-emerald-50/60 border border-emerald-200 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="text-[11px] font-extrabold text-emerald-950 flex items-center gap-1.5">
+                <Percent className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Company Commission / Rebate (Optional)</span>
+              </label>
+              <div className="inline-flex items-center bg-white rounded-lg border border-emerald-200 p-0.5 text-[10px] font-bold">
+                {(
+                  [
+                    { id: 'NONE', label: 'No Commission' },
+                    { id: 'PERCENT', label: '% of Base' },
+                    { id: 'FIXED', label: 'Fixed ₹' },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => {
+                      setCommissionType(opt.id);
+                      if (opt.id === 'NONE') {
+                        setCommissionInput('');
+                        setCommissionNote('');
+                      }
+                    }}
+                    className={`px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
+                      commissionType === opt.id
+                        ? 'bg-emerald-600 text-white'
+                        : 'text-slate-600 hover:text-emerald-800'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {commissionType !== 'NONE' && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-0.5">
+                <div>
+                  <label className="text-[10.5px] font-bold text-emerald-900 block mb-1">
+                    {commissionType === 'PERCENT' ? 'Commission Rate (%)' : 'Commission Amount (₹)'}
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max={commissionType === 'PERCENT' ? '100' : undefined}
+                    value={commissionInput}
+                    onChange={(e) => setCommissionInput(e.target.value)}
+                    placeholder={commissionType === 'PERCENT' ? 'e.g. 2.5' : 'e.g. 500'}
+                    className="w-full px-2.5 py-1.5 text-xs bg-white border border-emerald-300 rounded-lg font-mono-code font-bold text-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  {commissionAmount > 0 && (
+                    <span className="text-[10px] font-mono-code font-bold text-emerald-700 block mt-0.5">
+                      Earned: ₹{commissionAmount.toFixed(2)} ({commissionPercent}%)
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-[10.5px] font-bold text-emerald-900 block mb-1">
+                    Commission Settlement Mode
+                  </label>
+                  <select
+                    value={commissionMode}
+                    onChange={(e) => setCommissionMode(e.target.value as PurchaseCommissionMode)}
+                    className="w-full px-2.5 py-1.5 text-xs bg-white border border-emerald-300 rounded-lg font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="DEDUCT_BILL">Deduct from Purchase Bill</option>
+                    <option value="SEPARATE_BANK">Received Separately in Bank / UPI</option>
+                    <option value="SEPARATE_CASH">Received Separately in Cash</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10.5px] font-bold text-emerald-900 block mb-1">
+                    Scheme / Commission Note
+                  </label>
+                  <input
+                    type="text"
+                    value={commissionNote}
+                    onChange={(e) => setCommissionNote(e.target.value)}
+                    placeholder="e.g. IFFCO Kharif dealer margin"
+                    className="w-full px-2.5 py-1.5 text-xs bg-white border border-emerald-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Live Purchase Transaction Breakdown */}
@@ -582,6 +819,31 @@ export const FillExistingProductModal: React.FC<FillExistingProductModalProps> =
                   <span className="text-base font-black text-teal-300">₹{totalPurchaseAmount.toFixed(2)}</span>
                 </div>
               </div>
+
+              {commissionAmount > 0 && (
+                <div className="pt-2 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs font-mono-code">
+                  <div className="flex items-center gap-2 text-emerald-300">
+                    <span className="font-sans text-[11px] font-bold">Company Commission:</span>
+                    <span className="font-black">
+                      ₹{commissionAmount.toFixed(2)}
+                      {commissionPercent > 0 ? ` (${commissionPercent}%)` : ''}
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/30 font-sans">
+                      {commissionMode === 'DEDUCT_BILL'
+                        ? 'Deducted from Bill'
+                        : commissionMode === 'SEPARATE_BANK'
+                        ? 'Separate Bank/UPI Receipt'
+                        : 'Separate Cash Receipt'}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-sans text-[10px] text-slate-400 mr-1.5">Net Payable to Supplier:</span>
+                    <span className="text-sm font-black text-white">
+                      ₹{netPayableAmount.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </form>
@@ -660,10 +922,28 @@ export const FillExistingProductModal: React.FC<FillExistingProductModalProps> =
                   </div>
                   <div className="flex justify-between gap-2">
                     <span className="text-slate-600 font-semibold">Total Bill (Incl. GST):</span>
-                    <span className="font-mono-code font-black text-amber-900 text-sm">
+                    <span className="font-mono-code font-bold text-slate-900">
                       ₹{totalPurchaseAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
+                  {commissionAmount > 0 && (
+                    <>
+                      <div className="flex justify-between gap-2 text-emerald-800">
+                        <span className="font-semibold">
+                          Company Commission ({commissionMode === 'DEDUCT_BILL' ? 'Deducted' : commissionMode === 'SEPARATE_BANK' ? 'Bank' : 'Cash'}):
+                        </span>
+                        <span className="font-mono-code font-bold">
+                          -₹{commissionAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-2 border-t border-amber-200 pt-1">
+                        <span className="text-slate-700 font-extrabold">Net Payable (Creditor):</span>
+                        <span className="font-mono-code font-black text-amber-900 text-sm">
+                          ₹{netPayableAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </>
+                  )}
                   <div className="flex justify-between gap-2">
                     <span className="text-slate-600 font-semibold">Supplier (Creditor):</span>
                     <span className="font-bold text-slate-900 text-right">
@@ -705,6 +985,19 @@ export const FillExistingProductModal: React.FC<FillExistingProductModalProps> =
               </div>
             </div>
           </div>
+        )}
+
+        {/* Quick Register New Supplier Modal from Purchase Entry */}
+        {onSaveSupplier && (
+          <SupplierFormModal
+            isOpen={isQuickAddSupplierOpen}
+            onClose={() => setIsQuickAddSupplierOpen(false)}
+            existingSuppliers={suppliers}
+            onSaveSupplier={onSaveSupplier}
+            onSavedCallback={(saved) => {
+              setSupplierId(saved.id);
+            }}
+          />
         )}
       </div>
     </div>

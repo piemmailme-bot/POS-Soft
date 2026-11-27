@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   CheckCircle2,
   AlertTriangle,
@@ -49,6 +49,8 @@ import { Navbar } from './components/Navbar';
 import { RightSidebar, AppTabId } from './components/RightSidebar';
 import { PosTerminal } from './components/PosTerminal';
 import { InventoryManager } from './components/InventoryManager';
+import { SupplierMasterManager } from './components/SupplierMasterManager';
+import { SupplierSaveResult } from './components/SupplierFormModal';
 import { DayCashierSummary } from './components/DayCashierSummary';
 import { CashDrawerSummary } from './components/CashDrawerSummary';
 import { QrScannerModal } from './components/QrScannerModal';
@@ -523,9 +525,11 @@ export default function App() {
     [notifyOtherWindows, ensureCloudStorageActive, checkCloudStorageStatus]
   );
 
-  const handleSavePartyAccount = useCallback(
-    async (partyInput: PartyAccount): Promise<boolean> => {
-      if (!ensureCloudStorageActive()) return false;
+  const handleSaveSupplierDetailed = useCallback(
+    async (partyInput: PartyAccount): Promise<SupplierSaveResult> => {
+      if (!ensureCloudStorageActive()) {
+        return { success: false, error: 'Database connection is currently unavailable.' };
+      }
       try {
         const res = await authFetch('/api/parties', {
           method: 'POST',
@@ -534,19 +538,63 @@ export default function App() {
         });
         if (res.status === 503) {
           checkCloudStorageStatus(false);
-          return false;
+          return { success: false, error: 'Database is currently unavailable. Please reconnect.' };
         }
-        if (!res.ok) return false;
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          return {
+            success: false,
+            error: data?.error || 'Failed to save supplier record.',
+          };
+        }
         const saved: PartyAccount = data?.party;
         if (saved) {
           setPartyAccounts((prev) => [...prev.filter((p) => p.id !== saved.id), saved]);
         }
         notifyOtherWindows('PARTY_UPDATED', false);
-        return true;
-      } catch (e) {
-        console.error('Failed to save party account:', e);
-        return false;
+        return { success: true, party: saved };
+      } catch (e: any) {
+        console.error('Failed to save supplier account:', e);
+        return { success: false, error: e?.message || 'Network error while saving supplier.' };
+      }
+    },
+    [notifyOtherWindows, ensureCloudStorageActive, checkCloudStorageStatus]
+  );
+
+  const handleSavePartyAccount = useCallback(
+    async (partyInput: PartyAccount): Promise<boolean> => {
+      const result = await handleSaveSupplierDetailed(partyInput);
+      return result.success;
+    },
+    [handleSaveSupplierDetailed]
+  );
+
+  const handleDeleteSupplierDetailed = useCallback(
+    async (id: string): Promise<{ success: boolean; error?: string }> => {
+      if (!ensureCloudStorageActive()) {
+        return { success: false, error: 'Database connection is currently unavailable.' };
+      }
+      try {
+        const res = await authFetch(`/api/parties/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (res.status === 503) {
+          checkCloudStorageStatus(false);
+          return { success: false, error: 'Database is currently unavailable. Please reconnect.' };
+        }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          return {
+            success: false,
+            error:
+              data?.error ||
+              'Cannot delete supplier. Suppliers with existing transactions must be deactivated instead.',
+          };
+        }
+        setPartyAccounts((prev) => prev.filter((p) => p.id !== id));
+        notifyOtherWindows('PARTY_DELETED', false);
+        return { success: true };
+      } catch (e: any) {
+        console.error('Failed to delete party:', e);
+        return { success: false, error: e?.message || 'Network error while deleting supplier.' };
       }
     },
     [notifyOtherWindows, ensureCloudStorageActive, checkCloudStorageStatus]
@@ -554,23 +602,10 @@ export default function App() {
 
   const handleDeleteParty = useCallback(
     async (id: string): Promise<boolean> => {
-      if (!ensureCloudStorageActive()) return false;
-      try {
-        const res = await authFetch(`/api/parties/${encodeURIComponent(id)}`, { method: 'DELETE' });
-        if (res.status === 503) {
-          checkCloudStorageStatus(false);
-          return false;
-        }
-        if (!res.ok) return false;
-        setPartyAccounts((prev) => prev.filter((p) => p.id !== id));
-        notifyOtherWindows('PARTY_DELETED', false);
-        return true;
-      } catch (e) {
-        console.error('Failed to delete party:', e);
-        return false;
-      }
+      const result = await handleDeleteSupplierDetailed(id);
+      return result.success;
     },
-    [notifyOtherWindows, ensureCloudStorageActive, checkCloudStorageStatus]
+    [handleDeleteSupplierDetailed]
   );
 
   const handleAddReturnNote = useCallback(
@@ -1560,6 +1595,12 @@ export default function App() {
     supplierName?: string;
     supplierInvoiceNo?: string;
     paymentStatus?: 'CREDIT' | 'CASH' | 'BANK_UPI';
+    commissionType?: PurchaseTransaction['commissionType'];
+    commissionPercent?: number;
+    commissionAmount?: number;
+    commissionMode?: PurchaseTransaction['commissionMode'];
+    commissionNote?: string;
+    netPayableAmount?: number;
   }) => {
     const now = new Date();
     const purchaseDate = getIstDateTimeStr(now);
@@ -1574,6 +1615,14 @@ export default function App() {
     const totalGstAmount = Number(((baseAmount * gstPct) / 100).toFixed(2));
     const totalAmount = Number((baseAmount + totalGstAmount).toFixed(2));
     const halfGst = Number((totalGstAmount / 2).toFixed(2));
+    const commissionAmount = Number(Math.max(0, Number(params.commissionAmount || 0)).toFixed(2));
+    const commissionMode = params.commissionMode || 'DEDUCT_BILL';
+    const commissionType = commissionAmount > 0 ? params.commissionType || 'FIXED' : 'NONE';
+    const commissionPercent = Number(Math.max(0, Number(params.commissionPercent || 0)).toFixed(2));
+    const netPayableAmount =
+      commissionAmount > 0 && commissionMode === 'DEDUCT_BILL'
+        ? Number(Math.max(0, totalAmount - commissionAmount).toFixed(2))
+        : totalAmount;
     const dateStamp = getIstDateStr(now).replace(/-/g, '');
     const seq = String(purchaseTransactions.length + 1).padStart(4, '0');
 
@@ -1598,6 +1647,12 @@ export default function App() {
       sgstAmount: halfGst,
       totalGstAmount,
       totalAmount,
+      commissionType,
+      commissionPercent,
+      commissionAmount,
+      commissionMode,
+      commissionNote: commissionAmount > 0 ? params.commissionNote : undefined,
+      netPayableAmount,
       supplierNote: params.supplierNote || '',
       supplierId: params.supplierId,
       supplierName: params.supplierName,
@@ -1658,6 +1713,12 @@ export default function App() {
       supplierInvoiceNo?: string;
       paymentStatus?: 'CREDIT' | 'CASH' | 'BANK_UPI';
       supplierNote?: string;
+      commissionType?: PurchaseTransaction['commissionType'];
+      commissionPercent?: number;
+      commissionAmount?: number;
+      commissionMode?: PurchaseTransaction['commissionMode'];
+      commissionNote?: string;
+      netPayableAmount?: number;
     }
   ) => {
     if (!ensureCloudStorageActive()) return;
@@ -1708,6 +1769,12 @@ export default function App() {
       supplierInvoiceNo: purchaseMeta?.supplierInvoiceNo,
       paymentStatus: purchaseMeta?.paymentStatus || 'BANK_UPI',
       supplierNote: purchaseMeta?.supplierNote || 'New product addition',
+      commissionType: purchaseMeta?.commissionType,
+      commissionPercent: purchaseMeta?.commissionPercent,
+      commissionAmount: purchaseMeta?.commissionAmount,
+      commissionMode: purchaseMeta?.commissionMode,
+      commissionNote: purchaseMeta?.commissionNote,
+      netPayableAmount: purchaseMeta?.netPayableAmount,
     });
   };
 
@@ -1821,6 +1888,12 @@ export default function App() {
       supplierName: options?.supplierName,
       supplierInvoiceNo: options?.supplierInvoiceNo,
       paymentStatus: options?.paymentStatus,
+      commissionType: options?.commissionType,
+      commissionPercent: options?.commissionPercent,
+      commissionAmount: options?.commissionAmount,
+      commissionMode: options?.commissionMode,
+      commissionNote: options?.commissionNote,
+      netPayableAmount: options?.netPayableAmount,
     });
     return true;
   };
@@ -2039,6 +2112,16 @@ export default function App() {
   const grandTotal = Math.ceil(rawTotal);
   const roundOff = Number((grandTotal - rawTotal).toFixed(2));
 
+  const supplierAccounts = useMemo(
+    () => partyAccounts.filter((p) => p.partyType === 'SUPPLIER'),
+    [partyAccounts]
+  );
+
+  const memberAccounts = useMemo(
+    () => partyAccounts.filter((p) => p.partyType === 'MEMBER'),
+    [partyAccounts]
+  );
+
   // Security guard: Redirect unauthorized tabs back to POS
   useEffect(() => {
     if (currentCashier && !isAdmin && activeTab === 'admin') {
@@ -2052,6 +2135,7 @@ export default function App() {
     if (
       activeTab === 'pos' ||
       activeTab === 'inventory' ||
+      activeTab === 'suppliers' ||
       activeTab === 'ledger' ||
       activeTab === 'invoices' ||
       activeTab === 'purchase_summary' ||
@@ -2062,6 +2146,7 @@ export default function App() {
     ) {
       reloadStoreData({
         syncCloud:
+          activeTab === 'suppliers' ||
           activeTab === 'balance_sheet' ||
           activeTab === 'fixed_assets' ||
           activeTab === 'gst_analysis' ||
@@ -2230,7 +2315,7 @@ export default function App() {
               setDiscountMode={setDiscountMode}
               discountValue={discountValue}
               setDiscountValue={setDiscountValue}
-              members={partyAccounts.filter((p) => p.partyType === 'MEMBER')}
+              members={memberAccounts}
               heldBills={heldBills}
               onHoldCurrentBill={handleHoldCurrentBill}
               onResumeHeldBill={handleResumeHeldBill}
@@ -2251,7 +2336,11 @@ export default function App() {
               onDeleteProduct={handleDeleteProduct}
               onFillExistingProduct={handleFillExistingProduct}
               purchaseTransactions={purchaseTransactions}
-              suppliers={partyAccounts.filter((p) => p.partyType === 'SUPPLIER')}
+              suppliers={supplierAccounts}
+              accountVouchers={accountVouchers}
+              returnNotes={returnNotes}
+              onSaveSupplier={handleSaveSupplierDetailed}
+              onOpenSupplierMaster={() => setActiveTab('suppliers')}
               isAdmin={isAdmin}
               onOpenProductQr={(product) => setSelectedProductForQr(product)}
               onOpenBarcodePrint={handleOpenBarcodePrint}
@@ -2261,6 +2350,21 @@ export default function App() {
               onRenameCategory={handleRenameCategory}
               onBulkImportProducts={handleBulkImportProducts}
               adminSettings={adminSettings}
+            />
+          )}
+
+          {activeTab === 'suppliers' && (
+            <SupplierMasterManager
+              suppliers={supplierAccounts}
+              purchaseTransactions={purchaseTransactions}
+              accountVouchers={accountVouchers}
+              returnNotes={returnNotes}
+              society={society}
+              isAdmin={isAdmin}
+              onSaveSupplier={handleSaveSupplierDetailed}
+              onDeleteSupplier={handleDeleteSupplierDetailed}
+              onAddAccountVoucher={handleAddAccountVoucher}
+              onRefreshData={handleGlobalRefresh}
             />
           )}
 

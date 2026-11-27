@@ -28,6 +28,11 @@ import type {
 } from '../types.ts';
 
 import { getIstDateStr, getIstTimeStr, getIstDateTimeStr } from '../utils/dateUtils.ts';
+import {
+  generateNextSupplierCode,
+  checkDuplicateSupplier,
+  normalizeNameKey,
+} from '../utils/supplierLedger.ts';
 
 dotenv.config();
 
@@ -2504,6 +2509,23 @@ function normalizePurchaseTransaction(raw: Partial<PurchaseTransaction>): Purcha
       ? raw.entryType
       : 'FILL_EXISTING';
 
+  const commissionType: PurchaseTransaction['commissionType'] =
+    raw.commissionType === 'PERCENT' || raw.commissionType === 'FIXED'
+      ? raw.commissionType
+      : Number(raw.commissionAmount || 0) > 0
+      ? 'FIXED'
+      : 'NONE';
+  const commissionPercent = Math.max(0, Number(Number(raw.commissionPercent || 0).toFixed(2)));
+  const commissionAmount = Math.max(0, Number(Number(raw.commissionAmount || 0).toFixed(2)));
+  const commissionMode: PurchaseTransaction['commissionMode'] =
+    raw.commissionMode === 'SEPARATE_BANK' || raw.commissionMode === 'SEPARATE_CASH'
+      ? raw.commissionMode
+      : 'DEDUCT_BILL';
+  const netPayableAmount =
+    commissionAmount > 0 && commissionMode === 'DEDUCT_BILL'
+      ? Number(Math.max(0, totalAmt - commissionAmount).toFixed(2))
+      : Number(totalAmt.toFixed(2));
+
   return {
     id: String(raw.id || `pur-${Date.now()}-${Math.floor(Math.random() * 1000)}`),
     purchaseRef: String(
@@ -2530,6 +2552,12 @@ function normalizePurchaseTransaction(raw: Partial<PurchaseTransaction>): Purcha
     sgstAmount: Number((raw.sgstAmount !== undefined ? raw.sgstAmount : computedGst / 2).toFixed(2)),
     totalGstAmount: Number((raw.totalGstAmount !== undefined ? raw.totalGstAmount : computedGst).toFixed(2)),
     totalAmount: Number(totalAmt.toFixed(2)),
+    commissionType,
+    commissionPercent,
+    commissionAmount,
+    commissionMode,
+    commissionNote: raw.commissionNote ? String(raw.commissionNote).trim() : '',
+    netPayableAmount,
     supplierId: raw.supplierId ? String(raw.supplierId) : '',
     supplierName: raw.supplierName ? String(raw.supplierName) : '',
     supplierInvoiceNo: raw.supplierInvoiceNo ? String(raw.supplierInvoiceNo) : '',
@@ -2590,6 +2618,45 @@ function serializePurchaseTxForSupabase(tx: PurchaseTransaction) {
   };
 }
 
+function serializeExtendedPurchaseTxForSupabase(tx: PurchaseTransaction) {
+  return {
+    ...serializePurchaseTxForSupabase(tx),
+    commissionType: tx.commissionType || 'NONE',
+    commissionPercent: tx.commissionPercent || 0,
+    commissionAmount: tx.commissionAmount || 0,
+    commissionMode: tx.commissionMode || 'DEDUCT_BILL',
+    commissionNote: tx.commissionNote || '',
+    netPayableAmount: tx.netPayableAmount ?? tx.totalAmount,
+  };
+}
+
+function mergePurchaseAuditFields(
+  existing: PurchaseTransaction | undefined,
+  fromAudit: PurchaseTransaction
+): PurchaseTransaction {
+  if (!existing) return fromAudit;
+  return normalizePurchaseTransaction({
+    ...existing,
+    commissionType:
+      Number(existing.commissionAmount || 0) > 0
+        ? existing.commissionType
+        : fromAudit.commissionType,
+    commissionPercent:
+      Number(existing.commissionAmount || 0) > 0
+        ? existing.commissionPercent
+        : fromAudit.commissionPercent,
+    commissionAmount:
+      Number(existing.commissionAmount || 0) > 0
+        ? existing.commissionAmount
+        : fromAudit.commissionAmount,
+    commissionMode:
+      Number(existing.commissionAmount || 0) > 0
+        ? existing.commissionMode
+        : fromAudit.commissionMode,
+    commissionNote: existing.commissionNote || fromAudit.commissionNote || '',
+  });
+}
+
 export async function getAllPurchaseTransactions(): Promise<PurchaseTransaction[]> {
   const mergedMap = new Map<string, PurchaseTransaction>();
 
@@ -2601,8 +2668,8 @@ export async function getAllPurchaseTransactions(): Promise<PurchaseTransaction[
   for (const log of memoryStore.auditLogs) {
     if (log.action === 'PURCHASE_TRANSACTION') {
       const parsed = parsePurchaseTxFromAuditDetails(log.details);
-      if (parsed && !mergedMap.has(parsed.id)) {
-        mergedMap.set(parsed.id, parsed);
+      if (parsed) {
+        mergedMap.set(parsed.id, mergePurchaseAuditFields(mergedMap.get(parsed.id), parsed));
       }
     }
   }
@@ -2619,7 +2686,8 @@ export async function getAllPurchaseTransactions(): Promise<PurchaseTransaction[
       if (!tableErr && Array.isArray(tableRows)) {
         for (const row of tableRows) {
           const norm = normalizePurchaseTransaction(row);
-          mergedMap.set(norm.id, norm);
+          const prev = mergedMap.get(norm.id);
+          mergedMap.set(norm.id, mergePurchaseAuditFields(norm, prev || norm));
           existingInTableIds.add(norm.id);
         }
       }
@@ -2636,11 +2704,10 @@ export async function getAllPurchaseTransactions(): Promise<PurchaseTransaction[
         for (const row of auditRows) {
           const parsed = parsePurchaseTxFromAuditDetails(row.details);
           if (parsed) {
-            if (!mergedMap.has(parsed.id)) {
-              mergedMap.set(parsed.id, parsed);
-            }
+            const merged = mergePurchaseAuditFields(mergedMap.get(parsed.id), parsed);
+            mergedMap.set(parsed.id, merged);
             if (!tableErr && !existingInTableIds.has(parsed.id)) {
-              missingFromTable.push(parsed);
+              missingFromTable.push(merged);
               existingInTableIds.add(parsed.id);
             }
           }
@@ -2682,15 +2749,25 @@ export async function addPurchaseTransaction(
   saveStoreToDisk();
 
   let syncedToCloud = false;
+  let needAuditMirror = Number(tx.commissionAmount || 0) > 0;
   if (supabase && supabaseStatus.connected) {
     try {
-      const { error } = await supabase
+      const { error: extError } = await supabase
         .from('purchase_transactions')
-        .upsert([serializePurchaseTxForSupabase(tx)]);
-      if (!error) {
+        .upsert([serializeExtendedPurchaseTxForSupabase(tx)]);
+      if (!extError) {
         syncedToCloud = true;
       } else {
-        const summary = `${tx.purchaseRef} | ${tx.entryType} | +${tx.addedQuantity} ${tx.unit} "${tx.productName}" (Stock: ${tx.previousStock} -> ${tx.newStock}, Total: ₹${tx.totalAmount.toFixed(2)})`;
+        const { error: baseError } = await supabase
+          .from('purchase_transactions')
+          .upsert([serializePurchaseTxForSupabase(tx)]);
+        syncedToCloud = true;
+        if (baseError || Number(tx.commissionAmount || 0) > 0) {
+          needAuditMirror = true;
+        }
+      }
+      if (needAuditMirror) {
+        const summary = `${tx.purchaseRef} | ${tx.entryType} | +${tx.addedQuantity} ${tx.unit} "${tx.productName}" (Total: ₹${tx.totalAmount.toFixed(2)}${tx.commissionAmount ? `, Comm: ₹${tx.commissionAmount.toFixed(2)}` : ''})`;
         await addAuditLogEntry({
           id: `audit-${tx.id}`,
           timestamp: tx.purchaseDate,
@@ -2698,7 +2775,6 @@ export async function addPurchaseTransaction(
           performedBy: tx.performedBy,
           details: `[PURCHASE_TX:${JSON.stringify(tx)}] ${summary}`,
         });
-        syncedToCloud = true;
       }
     } catch (e) {
       console.error('[Supabase Error] addPurchaseTransaction:', e);
@@ -2716,7 +2792,7 @@ export async function addPurchaseTransaction(
             ? 'PRODUCT_PURCHASE_ADDED'
             : 'EXISTING_STOCK_FILLED',
         performedBy: tx.performedBy,
-        details: `${tx.purchaseRef}: Added +${tx.addedQuantity} ${tx.unit} to "${tx.productName}" (${tx.previousStock} -> ${tx.newStock} ${tx.unit}, ₹${tx.totalAmount.toFixed(2)}).`,
+        details: `${tx.purchaseRef}: Added +${tx.addedQuantity} ${tx.unit} to "${tx.productName}" (${tx.previousStock} -> ${tx.newStock} ${tx.unit}, ₹${tx.totalAmount.toFixed(2)}${tx.commissionAmount ? `, Comm: ₹${tx.commissionAmount.toFixed(2)}` : ''}).`,
       });
     }
   }
@@ -3183,6 +3259,14 @@ export async function deleteAccountVoucher(id: string): Promise<boolean> {
 // ==========================================
 // DATA ACCESS LAYER: PARTY ACCOUNTS (SUPPLIERS & MEMBERS)
 // ==========================================
+const VALID_SUPPLIER_CATEGORIES = new Set([
+  'Manufacturer',
+  'Distributor',
+  'Wholesaler',
+  'Retailer',
+  'Other',
+]);
+
 function normalizePartyAccount(
   raw: Partial<PartyAccount> & { partyCode?: string; balanceType?: string }
 ): PartyAccount {
@@ -3196,22 +3280,69 @@ function normalizePartyAccount(
     ? String(raw.memberCode).trim().toUpperCase()
     : raw.memberNo
     ? String(raw.memberNo).trim().toUpperCase()
-    : raw.partyCode
+    : raw.partyCode && partyType === 'MEMBER'
     ? String(raw.partyCode).trim().toUpperCase()
     : '';
+  const supplierCode =
+    partyType === 'SUPPLIER'
+      ? String(
+          raw.supplierCode ||
+            (raw.partyCode && /^SUP-/i.test(String(raw.partyCode)) ? raw.partyCode : '') ||
+            ''
+        )
+          .trim()
+          .toUpperCase()
+      : '';
+  const rawCategory = String(raw.supplierCategory || '').trim();
+  const supplierCategory =
+    partyType === 'SUPPLIER'
+      ? ((VALID_SUPPLIER_CATEGORIES.has(rawCategory)
+          ? rawCategory
+          : 'Distributor') as PartyAccount['supplierCategory'])
+      : undefined;
+  const rawBalType = String(raw.openingBalanceType || raw.balanceType || '').trim().toUpperCase();
+  const openingBalanceType: PartyAccount['openingBalanceType'] =
+    partyType === 'SUPPLIER'
+      ? rawBalType === 'ADVANCE'
+        ? 'ADVANCE'
+        : 'PAYABLE'
+      : undefined;
+  const isSupplier = partyType === 'SUPPLIER';
+  const formatText = (val?: string) => {
+    const trimmed = String(val || '').trim();
+    return isSupplier ? trimmed.toUpperCase() : trimmed;
+  };
+  const remarks = formatText(raw.remarks ?? raw.notes ?? '');
+
   return {
     id: String(raw.id || `party-${Date.now()}-${Math.floor(Math.random() * 1000)}`),
     partyType,
-    name: String(raw.name || 'Unnamed Party').trim(),
-    phone: raw.phone ? String(raw.phone).trim() : '',
+    supplierCode: supplierCode || undefined,
+    supplierCategory,
+    name: formatText(raw.name || 'Unnamed Party'),
+    contactPerson: formatText(raw.contactPerson),
+    phone: formatText(raw.phone),
+    alternatePhone: formatText(raw.alternatePhone),
+    email: raw.email ? String(raw.email).trim().toLowerCase() : '',
     gstin: raw.gstin ? String(raw.gstin).trim().toUpperCase() : '',
-    address: raw.address ? String(raw.address).trim() : '',
+    pan: raw.pan ? String(raw.pan).trim().toUpperCase() : '',
+    address: formatText(raw.address || raw.villageOrAddress || ''),
+    state: formatText(raw.state),
+    pinCode: raw.pinCode ? String(raw.pinCode).trim() : '',
     memberNo: raw.memberNo ? String(raw.memberNo).trim() : code,
     memberCode: code,
     discountPercent: clampedDisc,
-    openingBalance: Number(Number(raw.openingBalance || 0).toFixed(2)),
+    openingBalance: Number(Math.max(0, Number(raw.openingBalance || 0)).toFixed(2)),
+    openingBalanceType,
+    bankName: formatText(raw.bankName),
+    bankAccountNo: formatText(raw.bankAccountNo),
+    bankIfsc: raw.bankIfsc ? String(raw.bankIfsc).trim().toUpperCase() : '',
+    bankBranch: formatText(raw.bankBranch),
+    bankAccountDetails: formatText(raw.bankAccountDetails),
     creditLimit: raw.creditLimit !== undefined ? Number(Number(raw.creditLimit).toFixed(2)) : undefined,
     isActive: raw.isActive !== false,
+    remarks,
+    notes: remarks,
     createdAt: String(raw.createdAt || getIstDateStr()),
   };
 }
@@ -3219,15 +3350,45 @@ function normalizePartyAccount(
 function serializePartyAccountForSupabase(party: PartyAccount) {
   return {
     id: party.id,
-    partyCode: party.memberCode || party.memberNo || party.id,
+    partyCode:
+      party.partyType === 'SUPPLIER'
+        ? party.supplierCode || party.id
+        : party.memberCode || party.memberNo || party.id,
     name: party.name,
     partyType: party.partyType,
     phone: party.phone || '',
     gstin: party.gstin || '',
     address: party.address || '',
     openingBalance: party.openingBalance || 0,
-    balanceType: party.partyType === 'SUPPLIER' ? 'PAYABLE' : 'RECEIVABLE',
+    balanceType:
+      party.partyType === 'SUPPLIER'
+        ? party.openingBalanceType === 'ADVANCE'
+          ? 'ADVANCE'
+          : 'PAYABLE'
+        : 'RECEIVABLE',
+    isActive: party.isActive !== false,
     createdAt: party.createdAt || getIstDateStr(),
+  };
+}
+
+function serializeExtendedPartyAccountForSupabase(party: PartyAccount) {
+  return {
+    ...serializePartyAccountForSupabase(party),
+    supplierCode: party.supplierCode || '',
+    supplierCategory: party.supplierCategory || 'Distributor',
+    contactPerson: party.contactPerson || '',
+    alternatePhone: party.alternatePhone || '',
+    email: party.email || '',
+    pan: party.pan || '',
+    state: party.state || '',
+    pinCode: party.pinCode || '',
+    openingBalanceType: party.openingBalanceType || 'PAYABLE',
+    bankName: party.bankName || '',
+    bankAccountNo: party.bankAccountNo || '',
+    bankIfsc: party.bankIfsc || '',
+    bankBranch: party.bankBranch || '',
+    bankAccountDetails: party.bankAccountDetails || '',
+    remarks: party.remarks || party.notes || '',
   };
 }
 
@@ -3253,6 +3414,22 @@ function mergeAuditPartyFields(existing: PartyAccount | undefined, fromAudit: Pa
     ...fromAudit,
     discountPercent: fromAudit.discountPercent ?? existing.discountPercent ?? 0,
     memberCode: fromAudit.memberCode || existing.memberCode || existing.memberNo || '',
+    supplierCode: fromAudit.supplierCode || existing.supplierCode || '',
+    supplierCategory: fromAudit.supplierCategory || existing.supplierCategory,
+    contactPerson: fromAudit.contactPerson || existing.contactPerson || '',
+    alternatePhone: fromAudit.alternatePhone || existing.alternatePhone || '',
+    email: fromAudit.email || existing.email || '',
+    pan: fromAudit.pan || existing.pan || '',
+    state: fromAudit.state || existing.state || '',
+    pinCode: fromAudit.pinCode || existing.pinCode || '',
+    openingBalanceType: fromAudit.openingBalanceType || existing.openingBalanceType,
+    bankName: fromAudit.bankName || existing.bankName || '',
+    bankAccountNo: fromAudit.bankAccountNo || existing.bankAccountNo || '',
+    bankIfsc: fromAudit.bankIfsc || existing.bankIfsc || '',
+    bankBranch: fromAudit.bankBranch || existing.bankBranch || '',
+    bankAccountDetails: fromAudit.bankAccountDetails || existing.bankAccountDetails || '',
+    remarks: fromAudit.remarks || fromAudit.notes || existing.remarks || existing.notes || '',
+    isActive: fromAudit.isActive !== undefined ? fromAudit.isActive : existing.isActive,
   });
 }
 
@@ -3287,10 +3464,29 @@ export async function getAllPartyAccounts(): Promise<PartyAccount[]> {
           mergedMap.set(
             norm.id,
             normalizePartyAccount({
+              ...prevMem,
               ...norm,
               discountPercent:
                 row.discountPercent !== undefined ? norm.discountPercent : prevMem?.discountPercent ?? 0,
               memberCode: norm.memberCode || prevMem?.memberCode || '',
+              supplierCode: norm.supplierCode || prevMem?.supplierCode || '',
+              contactPerson: norm.contactPerson || prevMem?.contactPerson || '',
+              alternatePhone: norm.alternatePhone || prevMem?.alternatePhone || '',
+              email: norm.email || prevMem?.email || '',
+              pan: norm.pan || prevMem?.pan || '',
+              state: norm.state || prevMem?.state || '',
+              pinCode: norm.pinCode || prevMem?.pinCode || '',
+              bankName: norm.bankName || prevMem?.bankName || '',
+              bankAccountNo: norm.bankAccountNo || prevMem?.bankAccountNo || '',
+              bankIfsc: norm.bankIfsc || prevMem?.bankIfsc || '',
+              bankBranch: norm.bankBranch || prevMem?.bankBranch || '',
+              bankAccountDetails: norm.bankAccountDetails || prevMem?.bankAccountDetails || '',
+              remarks: norm.remarks || prevMem?.remarks || '',
+              openingBalanceType:
+                row.openingBalanceType || row.balanceType
+                  ? norm.openingBalanceType
+                  : prevMem?.openingBalanceType,
+              isActive: row.isActive !== undefined ? norm.isActive : prevMem?.isActive ?? true,
             })
           );
           existingIds.add(norm.id);
@@ -3301,7 +3497,7 @@ export async function getAllPartyAccounts(): Promise<PartyAccount[]> {
         .select('*')
         .eq('action', 'PARTY_ACCOUNT_SYNC')
         .order('timestamp', { ascending: false })
-        .limit(500);
+        .limit(1000);
       const missingFromTable: PartyAccount[] = [];
       if (!auditErr && Array.isArray(auditRows)) {
         const seenRemoteAuditIds = new Set<string>();
@@ -3328,7 +3524,16 @@ export async function getAllPartyAccounts(): Promise<PartyAccount[]> {
       console.error('[Supabase Error] getAllPartyAccounts:', e);
     }
   }
-  const sorted = Array.from(mergedMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+
+  // Ensure every existing SUPPLIER has a deterministic unique Supplier ID (SUP-XXXX)
+  const list = Array.from(mergedMap.values());
+  for (const item of list) {
+    if (item.partyType === 'SUPPLIER' && !item.supplierCode) {
+      item.supplierCode = generateNextSupplierCode(list);
+    }
+  }
+
+  const sorted = list.sort((a, b) => a.name.localeCompare(b.name));
   memoryStore.partyAccounts = sorted;
   saveStoreToDisk();
   return sorted;
@@ -3337,7 +3542,31 @@ export async function getAllPartyAccounts(): Promise<PartyAccount[]> {
 export async function upsertPartyAccount(
   rawParty: Partial<PartyAccount>
 ): Promise<{ success: boolean; party: PartyAccount }> {
-  const party = normalizePartyAccount(rawParty);
+  // Always hydrate latest parties from cloud if memory is empty so duplicate & ID checks are authoritative
+  if (memoryStore.partyAccounts.length === 0 && supabase && supabaseStatus.connected) {
+    await getAllPartyAccounts();
+  }
+
+  const normalized = normalizePartyAccount(rawParty);
+
+  if (normalized.partyType === 'SUPPLIER') {
+    const existingRecord = memoryStore.partyAccounts.find((p) => p.id === normalized.id);
+    if (!normalized.supplierCode) {
+      normalized.supplierCode =
+        existingRecord?.supplierCode || generateNextSupplierCode(memoryStore.partyAccounts);
+    }
+
+    const dupCheck = checkDuplicateSupplier(normalized, memoryStore.partyAccounts);
+    if (dupCheck.isDuplicate) {
+      const err = new Error(dupCheck.message || 'Duplicate supplier record detected.') as Error & {
+        statusCode?: number;
+      };
+      err.statusCode = 409;
+      throw err;
+    }
+  }
+
+  const party = normalized;
   const idx = memoryStore.partyAccounts.findIndex((p) => p.id === party.id);
   if (idx >= 0) memoryStore.partyAccounts[idx] = party;
   else memoryStore.partyAccounts = [party, ...memoryStore.partyAccounts];
@@ -3347,7 +3576,7 @@ export async function upsertPartyAccount(
     timestamp: getIstDateTimeStr(),
     action: 'PARTY_ACCOUNT_SYNC',
     performedBy: 'SYSTEM ADMIN',
-    details: `[PARTY_ACCOUNT_TX:${JSON.stringify(party)}] ${party.partyType}: ${party.name}`,
+    details: `[PARTY_ACCOUNT_TX:${JSON.stringify(party)}] ${party.partyType}: ${party.supplierCode ? `${party.supplierCode} ` : ''}${party.name}`,
   };
   memoryStore.auditLogs = [
     syncLog,
@@ -3357,11 +3586,19 @@ export async function upsertPartyAccount(
 
   if (supabase && supabaseStatus.connected) {
     try {
-      const { error } = await supabase
+      // Try full extended schema first; fall back cleanly to base columns if ALTER TABLE has not run yet
+      const { error: extError } = await supabase
         .from('party_accounts')
-        .upsert([serializePartyAccountForSupabase(party)]);
-      if (error) {
-        await supabase.from('party_accounts').upsert([party]);
+        .upsert([serializeExtendedPartyAccountForSupabase(party)]);
+      if (extError) {
+        const { error: baseError } = await supabase
+          .from('party_accounts')
+          .upsert([serializePartyAccountForSupabase(party)]);
+        if (baseError) {
+          // Final fallback without isActive in case legacy table lacks isActive
+          const { isActive: _omit, ...minimalPayload } = serializePartyAccountForSupabase(party);
+          await supabase.from('party_accounts').upsert([minimalPayload]);
+        }
       }
       await supabase.from('audit_logs').upsert([syncLog]);
     } catch (e) {
@@ -3372,6 +3609,44 @@ export async function upsertPartyAccount(
 }
 
 export async function deletePartyAccount(id: string): Promise<boolean> {
+  // Ensure transactions are loaded before deciding whether deletion is permitted
+  if (supabase && supabaseStatus.connected) {
+    if (memoryStore.partyAccounts.length === 0) await getAllPartyAccounts();
+    if (memoryStore.purchaseTransactions.length === 0) await getAllPurchaseTransactions();
+    if (memoryStore.accountVouchers.length === 0) await getAllAccountVouchers();
+    if (memoryStore.returnNotes.length === 0) await getAllReturnNotes();
+  }
+
+  const target = memoryStore.partyAccounts.find((p) => p.id === id);
+  if (target && target.partyType === 'SUPPLIER') {
+    const targetNameKey = normalizeNameKey(target.name);
+    const hasPurchase = memoryStore.purchaseTransactions.some(
+      (tx) =>
+        tx.supplierId === id ||
+        (!tx.supplierId && tx.supplierName && normalizeNameKey(tx.supplierName) === targetNameKey)
+    );
+    const hasPayment = memoryStore.accountVouchers.some(
+      (v) =>
+        v.voucherType === 'SUPPLIER_PAYMENT' &&
+        (v.partyId === id ||
+          (!v.partyId && v.payeeOrPayer && normalizeNameKey(v.payeeOrPayer) === targetNameKey))
+    );
+    const hasReturn = memoryStore.returnNotes.some(
+      (n) =>
+        n.noteType === 'DEBIT_NOTE' &&
+        (n.partyId === id ||
+          (!n.partyId && n.partyName && normalizeNameKey(n.partyName) === targetNameKey))
+    );
+
+    if (hasPurchase || hasPayment || hasReturn) {
+      const err = new Error(
+        `Cannot permanently delete "${target.name}" (${target.supplierCode || target.id}) because existing purchase, payment, or return transactions are linked. Deactivate the supplier instead.`
+      ) as Error & { statusCode?: number };
+      err.statusCode = 409;
+      throw err;
+    }
+  }
+
   memoryStore.partyAccounts = memoryStore.partyAccounts.filter((p) => p.id !== id);
   memoryStore.auditLogs = memoryStore.auditLogs.filter((l) => l.id !== `audit-${id}`);
   saveStoreToDisk();

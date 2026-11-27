@@ -14,12 +14,20 @@ import {
   Lock,
   Banknote,
   Package,
+  Percent,
 } from 'lucide-react';
-import { Product, UnitType, PartyAccount } from '../types';
+import {
+  Product,
+  UnitType,
+  PartyAccount,
+  PurchaseCommissionMode,
+  PurchaseCommissionType,
+} from '../types';
 import {
   checkDuplicateBarcode,
   generateUniqueBarcode,
 } from '../utils/productImages';
+import { SupplierFormModal, SupplierSaveResult } from './SupplierFormModal';
 
 export interface NewProductPurchaseMeta {
   supplierId?: string;
@@ -27,6 +35,12 @@ export interface NewProductPurchaseMeta {
   supplierInvoiceNo?: string;
   paymentStatus?: 'CREDIT' | 'CASH' | 'BANK_UPI';
   supplierNote?: string;
+  commissionType?: PurchaseCommissionType;
+  commissionPercent?: number;
+  commissionAmount?: number;
+  commissionMode?: PurchaseCommissionMode;
+  commissionNote?: string;
+  netPayableAmount?: number;
 }
 
 interface ProductFormModalProps {
@@ -36,6 +50,7 @@ interface ProductFormModalProps {
   existingProducts: Product[];
   categories: string[];
   suppliers?: PartyAccount[];
+  onSaveSupplier?: (supplier: PartyAccount) => Promise<SupplierSaveResult>;
   onSaveProduct: (
     productData: Omit<Product, 'id'>,
     existingId?: number,
@@ -60,6 +75,12 @@ interface ProductFormModalProps {
       sellingPriceWD?: number;
       sellingPriceWithGst?: number;
       hsnCode?: string;
+      commissionType?: PurchaseCommissionType;
+      commissionPercent?: number;
+      commissionAmount?: number;
+      commissionMode?: PurchaseCommissionMode;
+      commissionNote?: string;
+      netPayableAmount?: number;
     }
   ) => void;
   onAddNewCategory?: (newCategoryName: string) => void;
@@ -73,6 +94,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   existingProducts,
   categories,
   suppliers = [],
+  onSaveSupplier,
   onSaveProduct,
   onFillExistingProduct,
   onAddNewCategory,
@@ -101,7 +123,14 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const [supplierInvoiceNo, setSupplierInvoiceNo] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<'CREDIT' | 'CASH' | 'BANK_UPI'>('BANK_UPI');
   const [supplierNote, setSupplierNote] = useState('');
+  const [commissionType, setCommissionType] = useState<PurchaseCommissionType>('NONE');
+  const [commissionInput, setCommissionInput] = useState('');
+  const [commissionMode, setCommissionMode] = useState<PurchaseCommissionMode>('DEDUCT_BILL');
+  const [commissionNote, setCommissionNote] = useState('');
   const [showCreditConfirm, setShowCreditConfirm] = useState(false);
+  const [isQuickAddSupplierOpen, setIsQuickAddSupplierOpen] = useState(false);
+
+  const activeSuppliers = suppliers.filter((s) => s.isActive !== false);
 
   const numSellingPrice = sellingPrice === '' ? 0 : Number(sellingPrice);
   const numPurchasePrice = costPrice === '' ? 0 : Number(costPrice);
@@ -139,6 +168,28 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const totalPurchaseGstAmt = Number(((totalPurchasePriceWD * numGstPercent) / 100).toFixed(2));
   const totalPurchaseWithGst = Number((totalPurchasePriceWD + totalPurchaseGstAmt).toFixed(2));
   const purchaseHalfGstAmt = Number((totalPurchaseGstAmt / 2).toFixed(2));
+
+  const rawCommInput = Math.max(0, Number(commissionInput || 0) || 0);
+  const rawCommissionAmount =
+    commissionType === 'PERCENT'
+      ? Number(((totalPurchasePriceWD * Math.min(100, rawCommInput)) / 100).toFixed(2))
+      : commissionType === 'FIXED'
+      ? Number(rawCommInput.toFixed(2))
+      : 0;
+  const commissionAmount =
+    commissionMode === 'DEDUCT_BILL'
+      ? Number(Math.min(totalPurchaseWithGst, rawCommissionAmount).toFixed(2))
+      : rawCommissionAmount;
+  const commissionPercent =
+    commissionType === 'PERCENT'
+      ? Number(Math.min(100, rawCommInput).toFixed(2))
+      : totalPurchasePriceWD > 0 && commissionAmount > 0
+      ? Number(((commissionAmount / totalPurchasePriceWD) * 100).toFixed(2))
+      : 0;
+  const netPayableAmount =
+    commissionAmount > 0 && commissionMode === 'DEDUCT_BILL'
+      ? Number(Math.max(0, totalPurchaseWithGst - commissionAmount).toFixed(2))
+      : totalPurchaseWithGst;
 
   // Dropdown combobox state for Product Name & Category
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
@@ -247,6 +298,10 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     setSupplierInvoiceNo('');
     setPaymentStatus('BANK_UPI');
     setSupplierNote('');
+    setCommissionType('NONE');
+    setCommissionInput('');
+    setCommissionMode('DEDUCT_BILL');
+    setCommissionNote('');
     setShowCreditConfirm(false);
     setIsDropdownOpen(false);
     setIsCategoryDropdownOpen(false);
@@ -410,6 +465,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       supplierInvoiceNo: supplierInvoiceNo.trim() || undefined,
       paymentStatus,
       supplierNote: supplierNote.trim() || undefined,
+      commissionType: commissionAmount > 0 ? commissionType : 'NONE',
+      commissionPercent: commissionAmount > 0 ? commissionPercent : 0,
+      commissionAmount: commissionAmount > 0 ? commissionAmount : 0,
+      commissionMode: commissionAmount > 0 ? commissionMode : 'DEDUCT_BILL',
+      commissionNote: commissionAmount > 0 ? commissionNote.trim() || undefined : undefined,
+      netPayableAmount,
     };
 
     if (!isEditing && matchedExistingProduct && onFillExistingProduct) {
@@ -436,6 +497,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         supplierInvoiceNo: purchaseMeta.supplierInvoiceNo,
         paymentStatus: purchaseMeta.paymentStatus,
         supplierNote: purchaseMeta.supplierNote,
+        commissionType: purchaseMeta.commissionType,
+        commissionPercent: purchaseMeta.commissionPercent,
+        commissionAmount: purchaseMeta.commissionAmount,
+        commissionMode: purchaseMeta.commissionMode,
+        commissionNote: purchaseMeta.commissionNote,
+        netPayableAmount: purchaseMeta.netPayableAmount,
       });
       setShowCreditConfirm(false);
       onClose();
@@ -1265,6 +1332,31 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     </span>
                   </div>
                 </div>
+
+                {commissionAmount > 0 && (
+                  <div className="pt-2 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs font-mono-code">
+                    <div className="flex items-center gap-2 text-emerald-300">
+                      <span className="font-sans text-[11px] font-bold">Company Commission:</span>
+                      <span className="font-black">
+                        ₹{commissionAmount.toFixed(2)}
+                        {commissionPercent > 0 ? ` (${commissionPercent}%)` : ''}
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/30 font-sans">
+                        {commissionMode === 'DEDUCT_BILL'
+                          ? 'Deducted from Bill'
+                          : commissionMode === 'SEPARATE_BANK'
+                          ? 'Separate Bank/UPI'
+                          : 'Separate Cash'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="font-sans text-[10px] text-slate-400 mr-1.5">Net Payable:</span>
+                      <span className="text-sm font-black text-white">
+                        ₹{netPayableAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1375,18 +1467,34 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                    Supplier Ledger {paymentStatus === 'CREDIT' ? '(Recommended for Credit)' : '(Optional)'}
-                  </label>
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <label className="text-[11px] font-bold text-slate-700">
+                      Supplier / Company Master {paymentStatus === 'CREDIT' ? '(Recommended)' : '(Optional)'}
+                    </label>
+                    {onSaveSupplier && (
+                      <button
+                        type="button"
+                        onClick={() => setIsQuickAddSupplierOpen(true)}
+                        className="text-[10px] font-extrabold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200 inline-flex items-center gap-0.5 transition-colors cursor-pointer"
+                        title="Register a new supplier directly from Purchase Entry"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>New Supplier</span>
+                      </button>
+                    )}
+                  </div>
                   <select
                     value={supplierId}
                     onChange={(e) => setSupplierId(e.target.value)}
                     className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 font-semibold text-slate-800"
                   >
                     <option value="">General / Unspecified Supplier</option>
-                    {suppliers.map((s) => (
+                    {activeSuppliers.map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.name} {s.gstin ? `(${s.gstin})` : ''}
+                        {s.supplierCode ? `[${s.supplierCode}] ` : ''}
+                        {s.name}
+                        {s.supplierCategory ? ` · ${s.supplierCategory}` : ''}
+                        {s.phone ? ` · ${s.phone}` : ''}
                       </option>
                     ))}
                   </select>
@@ -1417,6 +1525,95 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 text-slate-800"
                   />
                 </div>
+              </div>
+
+              {/* Optional Company Commission / Dealer Rebate */}
+              <div className="pt-2 border-t border-slate-200/80 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="text-[11px] font-extrabold text-emerald-900 flex items-center gap-1.5">
+                    <Percent className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Company Commission / Rebate (Optional)</span>
+                  </label>
+                  <div className="inline-flex items-center bg-white rounded-lg border border-emerald-200 p-0.5 text-[10px] font-bold">
+                    {(
+                      [
+                        { id: 'NONE', label: 'No Commission' },
+                        { id: 'PERCENT', label: '% of Base' },
+                        { id: 'FIXED', label: 'Fixed ₹' },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => {
+                          setCommissionType(opt.id);
+                          if (opt.id === 'NONE') {
+                            setCommissionInput('');
+                            setCommissionNote('');
+                          }
+                        }}
+                        className={`px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
+                          commissionType === opt.id
+                            ? 'bg-emerald-600 text-white'
+                            : 'text-slate-600 hover:text-emerald-800'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {commissionType !== 'NONE' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div>
+                      <label className="text-[10.5px] font-bold text-emerald-900 block mb-1">
+                        {commissionType === 'PERCENT' ? 'Commission (%)' : 'Commission (₹)'}
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max={commissionType === 'PERCENT' ? '100' : undefined}
+                        value={commissionInput}
+                        onChange={(e) => setCommissionInput(e.target.value)}
+                        placeholder={commissionType === 'PERCENT' ? 'e.g. 2.5' : 'e.g. 500'}
+                        className="w-full px-2.5 py-1.5 text-xs bg-white border border-emerald-300 rounded-lg font-mono-code font-bold text-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                      {commissionAmount > 0 && (
+                        <span className="text-[10px] font-mono-code font-bold text-emerald-700 block mt-0.5">
+                          Earned: ₹{commissionAmount.toFixed(2)} ({commissionPercent}%)
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <label className="text-[10.5px] font-bold text-emerald-900 block mb-1">
+                        Commission Mode
+                      </label>
+                      <select
+                        value={commissionMode}
+                        onChange={(e) => setCommissionMode(e.target.value as PurchaseCommissionMode)}
+                        className="w-full px-2.5 py-1.5 text-xs bg-white border border-emerald-300 rounded-lg font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      >
+                        <option value="DEDUCT_BILL">Deduct from Purchase Bill</option>
+                        <option value="SEPARATE_BANK">Received Separately in Bank / UPI</option>
+                        <option value="SEPARATE_CASH">Received Separately in Cash</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10.5px] font-bold text-emerald-900 block mb-1">
+                        Scheme / Note
+                      </label>
+                      <input
+                        type="text"
+                        value={commissionNote}
+                        onChange={(e) => setCommissionNote(e.target.value)}
+                        placeholder="e.g. Company dealer margin"
+                        className="w-full px-2.5 py-1.5 text-xs bg-white border border-emerald-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1534,10 +1731,28 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   </div>
                   <div className="flex justify-between gap-2">
                     <span className="text-slate-600 font-semibold">Total Bill (Incl. GST):</span>
-                    <span className="font-mono-code font-black text-amber-900 text-sm">
+                    <span className="font-mono-code font-bold text-slate-900">
                       ₹{totalPurchaseWithGst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
+                  {commissionAmount > 0 && (
+                    <>
+                      <div className="flex justify-between gap-2 text-emerald-800">
+                        <span className="font-semibold">
+                          Company Commission ({commissionMode === 'DEDUCT_BILL' ? 'Deducted' : commissionMode === 'SEPARATE_BANK' ? 'Bank' : 'Cash'}):
+                        </span>
+                        <span className="font-mono-code font-bold">
+                          -₹{commissionAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-2 border-t border-amber-200 pt-1">
+                        <span className="text-slate-700 font-extrabold">Net Payable (Creditor):</span>
+                        <span className="font-mono-code font-black text-amber-900 text-sm">
+                          ₹{netPayableAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </>
+                  )}
                   <div className="flex justify-between gap-2">
                     <span className="text-slate-600 font-semibold">Supplier (Creditor):</span>
                     <span className="font-bold text-slate-900 text-right">
@@ -1579,6 +1794,19 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               </div>
             </div>
           </div>
+        )}
+
+        {/* Quick Register New Supplier Modal from New Product Purchase Entry */}
+        {onSaveSupplier && (
+          <SupplierFormModal
+            isOpen={isQuickAddSupplierOpen}
+            onClose={() => setIsQuickAddSupplierOpen(false)}
+            existingSuppliers={suppliers}
+            onSaveSupplier={onSaveSupplier}
+            onSavedCallback={(saved) => {
+              setSupplierId(saved.id);
+            }}
+          />
         )}
       </div>
     </div>

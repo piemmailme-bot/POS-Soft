@@ -729,12 +729,17 @@ export const BalanceSheetManager: React.FC<BalanceSheetManagerProps> = ({
       memberList.forEach((m) => memberNameMap.set(m.name.trim().toLowerCase(), m.id));
 
       partyAccounts.forEach((p) => {
+        const rawOpening = r2(Math.max(0, Number(p.openingBalance || 0)));
+        const signedOpening =
+          p.partyType === 'SUPPLIER' && p.openingBalanceType === 'ADVANCE'
+            ? r2(-rawOpening)
+            : rawOpening;
         byId.set(p.id, {
-          opening: r2(Math.max(0, Number(p.openingBalance || 0))),
+          opening: signedOpening,
           creditBills: 0,
           settled: 0,
           returns: 0,
-          netDue: r2(Math.max(0, Number(p.openingBalance || 0))),
+          netDue: signedOpening,
         });
       });
 
@@ -752,7 +757,12 @@ export const BalanceSheetManager: React.FC<BalanceSheetManagerProps> = ({
               ? Number(tx.baseAmount || 0)
               : Math.max(0, Number(tx.totalAmount || 0) - txGst);
           const txTot = r2(txBase + txGst);
-          if (txTot <= 0) return;
+          const rawComm = r2(Math.max(0, Number(tx.commissionAmount || 0)));
+          const commMode = tx.commissionMode || 'DEDUCT_BILL';
+          const deductedComm =
+            rawComm > 0 && commMode === 'DEDUCT_BILL' ? r2(Math.min(txTot, rawComm)) : 0;
+          const netBillPayable = r2(Math.max(0, txTot - deductedComm));
+          if (netBillPayable <= 0) return;
 
           const matchedId =
             (tx.supplierId && supplierIdSet.has(tx.supplierId) ? tx.supplierId : undefined) ||
@@ -760,9 +770,9 @@ export const BalanceSheetManager: React.FC<BalanceSheetManagerProps> = ({
 
           if (matchedId && byId.has(matchedId)) {
             const entry = byId.get(matchedId)!;
-            entry.creditBills = r2(entry.creditBills + txTot);
+            entry.creditBills = r2(entry.creditBills + netBillPayable);
           } else {
-            generalSupplierCreditBills = r2(generalSupplierCreditBills + txTot);
+            generalSupplierCreditBills = r2(generalSupplierCreditBills + netBillPayable);
           }
         });
       }
@@ -1121,6 +1131,41 @@ export const BalanceSheetManager: React.FC<BalanceSheetManagerProps> = ({
       }
     });
 
+    // 6a. Company Commission Received on Purchases (Dealer Margin / Rebate)
+    // Double-entry invariant:
+    // - DEDUCT_BILL: Cr Other Income (Company Commission), Dr Cash/Bank/Creditors reduction (net outflow = txTot - comm)
+    // - SEPARATE_BANK: Cr Other Income (Company Commission), Dr Bank/UPI (otherIncomeBank += comm)
+    // - SEPARATE_CASH: Cr Other Income (Company Commission), Dr Cash Drawer (otherIncomeCash += comm)
+    let purchaseCommissionTotal = 0;
+    let purchaseCommissionDeducted = 0;
+    periodPurchases.forEach((tx) => {
+      const rawComm = r2(Math.max(0, Number(tx.commissionAmount || 0)));
+      if (rawComm <= 0) return;
+      const txGst = Number(tx.totalGstAmount || 0);
+      const txBase =
+        Number(tx.baseAmount || 0) > 0
+          ? Number(tx.baseAmount || 0)
+          : Math.max(0, Number(tx.totalAmount || 0) - txGst);
+      const txTot = r2(txBase + txGst);
+      const mode = tx.commissionMode || 'DEDUCT_BILL';
+      const effectiveComm = mode === 'DEDUCT_BILL' ? r2(Math.min(txTot, rawComm)) : rawComm;
+      if (effectiveComm <= 0) return;
+
+      purchaseCommissionTotal = r2(purchaseCommissionTotal + effectiveComm);
+      otherIncomeCount += 1;
+      totalOtherIncome = r2(totalOtherIncome + effectiveComm);
+      const commHead = 'Company Commission Received (Purchase Rebate)';
+      incomeByHeadMap.set(commHead, r2((incomeByHeadMap.get(commHead) || 0) + effectiveComm));
+
+      if (mode === 'DEDUCT_BILL') {
+        purchaseCommissionDeducted = r2(purchaseCommissionDeducted + effectiveComm);
+      } else if (mode === 'SEPARATE_BANK') {
+        otherIncomeBank = r2(otherIncomeBank + effectiveComm);
+      } else if (mode === 'SEPARATE_CASH') {
+        otherIncomeCash = r2(otherIncomeCash + effectiveComm);
+      }
+    });
+
     // 6b. Fixed Assets & Period Depreciation
     let openingFixedAssetsNet = 0;
     let totalDepreciation = 0;
@@ -1175,9 +1220,9 @@ export const BalanceSheetManager: React.FC<BalanceSheetManagerProps> = ({
     let creditPurchasesInclGst = 0;
 
     if (purchaseSettlementMode === 'CASH') {
-      purchasePaidCash = purchaseTotalInclGst;
+      purchasePaidCash = r2(Math.max(0, purchaseTotalInclGst - purchaseCommissionDeducted));
     } else if (purchaseSettlementMode === 'BANK_UPI') {
-      purchasePaidBank = purchaseTotalInclGst;
+      purchasePaidBank = r2(Math.max(0, purchaseTotalInclGst - purchaseCommissionDeducted));
     } else {
       periodPurchases.forEach((tx) => {
         const txGst = Number(tx.totalGstAmount || 0);
@@ -1186,9 +1231,14 @@ export const BalanceSheetManager: React.FC<BalanceSheetManagerProps> = ({
             ? Number(tx.baseAmount || 0)
             : Math.max(0, Number(tx.totalAmount || 0) - txGst);
         const txTot = r2(txBase + txGst);
-        if (tx.paymentStatus === 'CASH') purchasePaidCash = r2(purchasePaidCash + txTot);
-        else if (tx.paymentStatus === 'BANK_UPI') purchasePaidBank = r2(purchasePaidBank + txTot);
-        else creditPurchasesInclGst = r2(creditPurchasesInclGst + txTot);
+        const rawComm = r2(Math.max(0, Number(tx.commissionAmount || 0)));
+        const commMode = tx.commissionMode || 'DEDUCT_BILL';
+        const deductedComm =
+          rawComm > 0 && commMode === 'DEDUCT_BILL' ? r2(Math.min(txTot, rawComm)) : 0;
+        const netOutflow = r2(Math.max(0, txTot - deductedComm));
+        if (tx.paymentStatus === 'CASH') purchasePaidCash = r2(purchasePaidCash + netOutflow);
+        else if (tx.paymentStatus === 'BANK_UPI') purchasePaidBank = r2(purchasePaidBank + netOutflow);
+        else creditPurchasesInclGst = r2(creditPurchasesInclGst + netOutflow);
       });
     }
 
@@ -1232,7 +1282,12 @@ export const BalanceSheetManager: React.FC<BalanceSheetManagerProps> = ({
     // 9. STATEMENT 4: PURE BALANCE SHEET (Standard Indian Format)
     const openingCreditors = r2(
       partyAccounts
-        .filter((p) => p.partyType === 'SUPPLIER')
+        .filter((p) => p.partyType === 'SUPPLIER' && p.openingBalanceType !== 'ADVANCE')
+        .reduce((s, p) => s + Math.max(0, Number(p.openingBalance || 0)), 0)
+    );
+    const openingSupplierAdvances = r2(
+      partyAccounts
+        .filter((p) => p.partyType === 'SUPPLIER' && p.openingBalanceType === 'ADVANCE')
         .reduce((s, p) => s + Math.max(0, Number(p.openingBalance || 0)), 0)
     );
     const openingDebtors = r2(
@@ -1245,7 +1300,11 @@ export const BalanceSheetManager: React.FC<BalanceSheetManagerProps> = ({
     const memberReceiptsTotal = r2(memberReceivedCash + memberReceivedBank);
 
     const rawCreditors = r2(
-      openingCreditors + creditPurchasesInclGst - supplierPaymentsTotal - purchaseReturnCreditLedger
+      openingCreditors -
+        openingSupplierAdvances +
+        creditPurchasesInclGst -
+        supplierPaymentsTotal -
+        purchaseReturnCreditLedger
     );
     const sundryCreditors = rawCreditors > 0 ? rawCreditors : 0;
     const supplierAdvancesAsset = rawCreditors < 0 ? r2(Math.abs(rawCreditors)) : 0;
@@ -1279,6 +1338,7 @@ export const BalanceSheetManager: React.FC<BalanceSheetManagerProps> = ({
         openingStockBase +
         openingFixedAssetsNet +
         openingDebtors +
+        openingSupplierAdvances +
         openingCgstItc +
         openingSgstItc -
         openingCreditors

@@ -244,6 +244,9 @@ export function exportPurchaseTransactionsToCsv(
     'SGST (₹)',
     'Total GST (₹)',
     'Total Purchase Amount (₹)',
+    'Company Commission (₹)',
+    'Commission Mode',
+    'Net Payable (₹)',
     'Batch No',
     'Mode of Payment',
     'Performed By',
@@ -262,6 +265,21 @@ export function exportPurchaseTransactionsToCsv(
         : tx.paymentStatus === 'BANK_UPI'
         ? 'Bank / NEFT / UPI'
         : 'Sundry Creditor (Credit)';
+    const commAmt = Number(tx.commissionAmount || 0);
+    const commModeLabel =
+      commAmt <= 0
+        ? 'None'
+        : (tx.commissionMode || 'DEDUCT_BILL') === 'DEDUCT_BILL'
+        ? 'Deducted from Bill'
+        : tx.commissionMode === 'SEPARATE_BANK'
+        ? 'Separate Bank/UPI'
+        : 'Separate Cash';
+    const netPay =
+      tx.netPayableAmount !== undefined
+        ? Number(tx.netPayableAmount)
+        : commAmt > 0 && (tx.commissionMode || 'DEDUCT_BILL') === 'DEDUCT_BILL'
+        ? Math.max(0, Number(tx.totalAmount || 0) - commAmt)
+        : Number(tx.totalAmount || 0);
     return [
       `"${tx.purchaseRef || ''}"`,
       `"${tx.purchaseDate || ''}"`,
@@ -281,6 +299,9 @@ export function exportPurchaseTransactionsToCsv(
       Number(tx.sgstAmount || 0).toFixed(2),
       Number(tx.totalGstAmount || 0).toFixed(2),
       Number(tx.totalAmount || 0).toFixed(2),
+      commAmt.toFixed(2),
+      `"${commModeLabel}"`,
+      netPay.toFixed(2),
       `"${(tx.batchNo || '').replace(/"/g, '""')}"`,
       `"${paymentModeLabel}"`,
       `"${(tx.performedBy || '').replace(/"/g, '""')}"`,

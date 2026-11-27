@@ -19,6 +19,7 @@ import {
   Receipt,
   FileSpreadsheet,
   Lock,
+  Building2,
 } from 'lucide-react';
 import {
   Product,
@@ -27,10 +28,13 @@ import {
   PurchaseTransaction,
   PurchaseEntryType,
   PartyAccount,
+  AccountLedgerVoucher,
+  ReturnNote,
 } from '../types';
 import { CATEGORIES } from '../data/initialData';
 import { ProductFormModal, NewProductPurchaseMeta } from './ProductFormModal';
 import { FillExistingProductModal, FillExistingOptions } from './FillExistingProductModal';
+import { SupplierSaveResult } from './SupplierFormModal';
 import {
   BulkExcelImportModal,
   BulkImportRowInput,
@@ -80,6 +84,10 @@ interface InventoryManagerProps {
   onRenameCategory?: (oldCategory: string, newCategory: string) => void;
   adminSettings?: AdminStoreSettings;
   suppliers?: PartyAccount[];
+  accountVouchers?: AccountLedgerVoucher[];
+  returnNotes?: ReturnNote[];
+  onSaveSupplier?: (supplier: PartyAccount) => Promise<SupplierSaveResult>;
+  onOpenSupplierMaster?: () => void;
 }
 
 export const InventoryManager: React.FC<InventoryManagerProps> = ({
@@ -99,6 +107,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   onRenameCategory,
   adminSettings,
   suppliers = [],
+  accountVouchers = [],
+  returnNotes = [],
+  onSaveSupplier,
+  onOpenSupplierMaster,
 }) => {
   const [activeInventoryTab, setActiveInventoryTab] = useState<'catalog' | 'purchases'>('catalog');
   const [searchQuery, setSearchQuery] = useState('');
@@ -466,6 +478,17 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 >
                   <FileSpreadsheet className="w-4 h-4 text-indigo-600" />
                   <span>Excel Bulk Setup (Temp)</span>
+                </button>
+              )}
+              {onOpenSupplierMaster && (
+                <button
+                  type="button"
+                  onClick={onOpenSupplierMaster}
+                  className="flex-1 sm:flex-none px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs border border-blue-200 transition-colors cursor-pointer"
+                  title="Open Supplier / Company Master & Ledgers"
+                >
+                  <Building2 className="w-4 h-4 text-blue-600" />
+                  <span>Supplier Master ({suppliers.length})</span>
                 </button>
               )}
               <button
@@ -983,6 +1006,29 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                           <div className="text-[10px] text-slate-400">
                             Base: ₹{Number(tx.baseAmount || 0).toFixed(2)}
                           </div>
+                          {Number(tx.commissionAmount || 0) > 0 && (
+                            <div className="mt-1 space-y-0.5">
+                              <span
+                                className="inline-block px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 text-[9.5px] font-bold"
+                                title={tx.commissionNote || 'Company Commission / Rebate'}
+                              >
+                                Comm: ₹{Number(tx.commissionAmount || 0).toFixed(2)}
+                                {Number(tx.commissionPercent || 0) > 0
+                                  ? ` (${Number(tx.commissionPercent).toFixed(1)}%)`
+                                  : ''}
+                              </span>
+                              {(tx.commissionMode || 'DEDUCT_BILL') === 'DEDUCT_BILL' && (
+                                <div className="text-[10px] font-bold text-slate-700">
+                                  Net: ₹
+                                  {Number(
+                                    tx.netPayableAmount !== undefined
+                                      ? tx.netPayableAmount
+                                      : Math.max(0, Number(tx.totalAmount || 0) - Number(tx.commissionAmount || 0))
+                                  ).toFixed(2)}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td className="py-3 px-4 text-slate-600 max-w-[230px]">
                           {(() => {
@@ -1148,6 +1194,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
         existingProducts={products}
         categories={allActiveCategories}
         suppliers={suppliers}
+        onSaveSupplier={onSaveSupplier}
         onSaveProduct={handleSaveProduct}
         onFillExistingProduct={(prod, qty, opts) => {
           handleFillExistingSubmit(prod, qty, opts);
@@ -1166,6 +1213,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
         products={products}
         categories={allActiveCategories}
         suppliers={suppliers}
+        purchaseTransactions={purchaseTransactions}
+        accountVouchers={accountVouchers}
+        returnNotes={returnNotes}
+        onSaveSupplier={onSaveSupplier}
         initialProduct={fillTargetProduct}
         onFillExistingProduct={handleFillExistingSubmit}
       />

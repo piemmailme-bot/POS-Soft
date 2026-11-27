@@ -274,6 +274,9 @@ export interface AdminAuditLog {
 
 export type PurchaseEntryType = 'NEW_PRODUCT' | 'FILL_EXISTING' | 'QUICK_RESTOCK';
 
+export type PurchaseCommissionType = 'NONE' | 'PERCENT' | 'FIXED';
+export type PurchaseCommissionMode = 'DEDUCT_BILL' | 'SEPARATE_BANK' | 'SEPARATE_CASH';
+
 export interface PurchaseTransaction {
   id: string;
   purchaseRef: string;
@@ -295,6 +298,12 @@ export interface PurchaseTransaction {
   sgstAmount: number;
   totalGstAmount: number;
   totalAmount: number;
+  commissionType?: PurchaseCommissionType;
+  commissionPercent?: number;
+  commissionAmount?: number;
+  commissionMode?: PurchaseCommissionMode;
+  commissionNote?: string;
+  netPayableAmount?: number;
   supplierId?: string;
   supplierName?: string;
   supplierInvoiceNo?: string;
@@ -346,20 +355,44 @@ export interface AccountLedgerVoucher {
 
 export type PartyType = 'SUPPLIER' | 'MEMBER';
 
+export type SupplierCategory =
+  | 'Manufacturer'
+  | 'Distributor'
+  | 'Wholesaler'
+  | 'Retailer'
+  | 'Other';
+
+export type OpeningBalanceType = 'PAYABLE' | 'ADVANCE';
+
 export interface PartyAccount {
   id: string;
   partyType: PartyType;
+  supplierCode?: string; // Auto-generated unique Supplier ID (e.g. SUP-0001)
+  supplierCategory?: SupplierCategory;
   name: string;
+  contactPerson?: string;
   phone?: string;
+  alternatePhone?: string;
+  email?: string;
   villageOrAddress?: string;
   address?: string;
+  state?: string;
+  pinCode?: string;
   gstin?: string;
+  pan?: string;
   memberNo?: string;
   memberCode?: string;
   discountPercent?: number;
-  openingBalance: number; // Positive = payable (for SUPPLIER) or receivable (for MEMBER)
+  openingBalance: number; // Non-negative amount; direction determined by openingBalanceType for SUPPLIER
+  openingBalanceType?: OpeningBalanceType; // PAYABLE (society owes supplier) | ADVANCE (supplier holds society advance)
+  bankName?: string;
+  bankAccountNo?: string;
+  bankIfsc?: string;
+  bankBranch?: string;
+  bankAccountDetails?: string;
   creditLimit?: number;
   isActive?: boolean;
+  remarks?: string;
   notes?: string;
   createdAt?: string;
 }

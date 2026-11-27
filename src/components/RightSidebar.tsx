@@ -20,6 +20,7 @@ import {
   ChevronRight,
   Layers,
   Building2,
+  Truck,
 } from 'lucide-react';
 import { SocietyProfile, CashierUser, AdminStoreSettings } from '../types';
 import { getTransactionMode } from '../utils/transactionControl';
@@ -27,6 +28,7 @@ import { getTransactionMode } from '../utils/transactionControl';
 export type AppTabId =
   | 'pos'
   | 'inventory'
+  | 'suppliers'
   | 'ledger'
   | 'drawer'
   | 'admin'
@@ -210,6 +212,33 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                   )}
                   {activeTab === 'inventory' && <ChevronRight className="w-3 h-3 text-emerald-400" />}
                 </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleSelectTab('suppliers')}
+              title="Supplier / Company Master"
+              className={`group w-full flex items-center ${
+                collapsed ? 'justify-center px-1.5 py-1.5' : 'justify-between px-2 py-1.5'
+              } rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer ${navButtonClass(
+                activeTab === 'suppliers',
+                'sky'
+              )}`}
+            >
+              <span className="flex items-center gap-2 min-w-0">
+                <span
+                  className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 transition-colors ${iconWrapClass(
+                    activeTab === 'suppliers',
+                    'sky'
+                  )}`}
+                >
+                  <Truck className="w-3.5 h-3.5" />
+                </span>
+                {!collapsed && <span className="truncate">Supplier / Company Master</span>}
+              </span>
+              {!collapsed && activeTab === 'suppliers' && (
+                <ChevronRight className="w-3 h-3 text-sky-400 shrink-0" />
               )}
             </button>
 

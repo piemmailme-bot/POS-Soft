@@ -207,6 +207,12 @@ ALTER TABLE purchase_transactions ADD COLUMN IF NOT EXISTS "supplierName" TEXT D
 ALTER TABLE purchase_transactions ADD COLUMN IF NOT EXISTS "supplierInvoiceNo" TEXT DEFAULT '';
 ALTER TABLE purchase_transactions ADD COLUMN IF NOT EXISTS "paymentStatus" TEXT DEFAULT 'CREDIT';
 ALTER TABLE purchase_transactions ADD COLUMN IF NOT EXISTS "expiryDate" TEXT DEFAULT '';
+ALTER TABLE purchase_transactions ADD COLUMN IF NOT EXISTS "commissionType" TEXT DEFAULT 'NONE';
+ALTER TABLE purchase_transactions ADD COLUMN IF NOT EXISTS "commissionPercent" NUMERIC DEFAULT 0;
+ALTER TABLE purchase_transactions ADD COLUMN IF NOT EXISTS "commissionAmount" NUMERIC DEFAULT 0;
+ALTER TABLE purchase_transactions ADD COLUMN IF NOT EXISTS "commissionMode" TEXT DEFAULT 'DEDUCT_BILL';
+ALTER TABLE purchase_transactions ADD COLUMN IF NOT EXISTS "commissionNote" TEXT DEFAULT '';
+ALTER TABLE purchase_transactions ADD COLUMN IF NOT EXISTS "netPayableAmount" NUMERIC DEFAULT 0;
 
 -- 9. GOVT GST PAYMENTS (CHALLAN PMT-06)
 CREATE TABLE IF NOT EXISTS gst_payments (
@@ -244,22 +250,52 @@ CREATE TABLE IF NOT EXISTS account_vouchers (
 CREATE TABLE IF NOT EXISTS party_accounts (
     id TEXT PRIMARY KEY,
     "partyType" TEXT NOT NULL DEFAULT 'MEMBER',
+    "supplierCode" TEXT DEFAULT '',
+    "supplierCategory" TEXT DEFAULT 'Distributor',
     name TEXT NOT NULL,
+    "contactPerson" TEXT DEFAULT '',
     phone TEXT DEFAULT '',
+    "alternatePhone" TEXT DEFAULT '',
+    email TEXT DEFAULT '',
     gstin TEXT DEFAULT '',
+    pan TEXT DEFAULT '',
     address TEXT DEFAULT '',
+    state TEXT DEFAULT '',
+    "pinCode" TEXT DEFAULT '',
     "memberNo" TEXT DEFAULT '',
     "memberCode" TEXT DEFAULT '',
     "discountPercent" NUMERIC DEFAULT 0,
     "openingBalance" NUMERIC NOT NULL DEFAULT 0,
+    "openingBalanceType" TEXT DEFAULT 'PAYABLE',
+    "bankName" TEXT DEFAULT '',
+    "bankAccountNo" TEXT DEFAULT '',
+    "bankIfsc" TEXT DEFAULT '',
+    "bankBranch" TEXT DEFAULT '',
+    "bankAccountDetails" TEXT DEFAULT '',
     "creditLimit" NUMERIC DEFAULT 0,
     "isActive" BOOLEAN DEFAULT TRUE,
+    remarks TEXT DEFAULT '',
     "createdAt" TEXT NOT NULL
 );
 ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS address TEXT DEFAULT '';
 ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS "memberCode" TEXT DEFAULT '';
 ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS "discountPercent" NUMERIC DEFAULT 0;
 ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS "isActive" BOOLEAN DEFAULT TRUE;
+ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS "supplierCode" TEXT DEFAULT '';
+ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS "supplierCategory" TEXT DEFAULT 'Distributor';
+ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS "contactPerson" TEXT DEFAULT '';
+ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS "alternatePhone" TEXT DEFAULT '';
+ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS email TEXT DEFAULT '';
+ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS pan TEXT DEFAULT '';
+ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS state TEXT DEFAULT '';
+ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS "pinCode" TEXT DEFAULT '';
+ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS "openingBalanceType" TEXT DEFAULT 'PAYABLE';
+ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS "bankName" TEXT DEFAULT '';
+ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS "bankAccountNo" TEXT DEFAULT '';
+ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS "bankIfsc" TEXT DEFAULT '';
+ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS "bankBranch" TEXT DEFAULT '';
+ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS "bankAccountDetails" TEXT DEFAULT '';
+ALTER TABLE party_accounts ADD COLUMN IF NOT EXISTS remarks TEXT DEFAULT '';
 
 -- 12. CREDIT & DEBIT RETURN NOTES (SALES RETURN & PURCHASE RETURN)
 CREATE TABLE IF NOT EXISTS return_notes (
